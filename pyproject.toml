@@ -1,0 +1,33 @@
+[project]
+name = "finance-agent"
+version = "0.1.0"
+description = "VAT reserve agent"
+requires-python = ">=3.14"
+dependencies = [
+    "alembic",
+    "fastapi",
+    "httpx",
+    "jinja2",
+    "langgraph",
+    "psycopg[binary]",
+    "pydantic>=2",
+    "sqlalchemy>=2",
+    "uvicorn",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["finance_agent*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+filterwarnings = [
+    "ignore:'asyncio.iscoroutinefunction' is deprecated:DeprecationWarning:langsmith",
+]
