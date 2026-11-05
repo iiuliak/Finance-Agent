@@ -31,6 +31,7 @@ class ProposalStatus(str, Enum):
     REJECTED = "rejected"
     EXECUTED = "executed"
     FAILED = "failed"
+    SUPERSEDED = "superseded"
 
 
 class TransferStatus(str, Enum):

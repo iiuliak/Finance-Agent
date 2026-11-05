@@ -97,7 +97,7 @@ class Proposal(Base):
             name="explanation_length",
         ),
         CheckConstraint(
-            "status IN ('pending', 'approved', 'rejected', 'executed', 'failed')",
+            "status IN ('pending', 'approved', 'rejected', 'executed', 'failed', 'superseded')",
             name="status_known",
         ),
     )

@@ -6,6 +6,8 @@ TEST_DATABASE_URL = os.environ.get(
 )
 # Set before any finance_agent.db import so nothing in a test run can reach the demo database.
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
+# Tests never call a real model, even when the shell has a .env with LLM_MODE=openai loaded.
+os.environ["LLM_MODE"] = "template"
 
 from collections.abc import Iterator  # noqa: E402
 

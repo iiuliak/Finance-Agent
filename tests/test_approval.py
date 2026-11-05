@@ -81,6 +81,32 @@ def test_approve_of_zero_inserts_no_transfer(db_session: Session) -> None:
     assert balances.reserve_balance == Decimal("4085.00")
 
 
+def test_a_new_proposal_supersedes_the_pending_one(db_session: Session) -> None:
+    """Approving two cards computed from the same balances must not fill the reserve twice."""
+    older = _pending(db_session)
+    newer = generate_proposal(db_session, demo_data.DEMO_ACCOUNT_ID)
+
+    with pytest.raises(ProposalConflict) as conflict:
+        decide(db_session, older.id, Decision.APPROVE, demo_data.DEMO_USER_ID)
+    result = decide(db_session, newer.id, Decision.APPROVE, demo_data.DEMO_USER_ID)
+    account = get_snapshot(db_session, demo_data.DEMO_ACCOUNT_ID).account
+
+    assert conflict.value.status == ProposalStatus.SUPERSEDED.value
+    assert result.status == ProposalStatus.EXECUTED
+    assert _transfer_count(db_session) == 1
+    assert account.operating_balance == Decimal("8415.00")
+    assert account.reserve_balance == Decimal("4085.00")
+
+
+def test_proposal_after_an_approval_proposes_zero(db_session: Session) -> None:
+    first = _pending(db_session)
+    decide(db_session, first.id, Decision.APPROVE, demo_data.DEMO_USER_ID)
+
+    second = generate_proposal(db_session, demo_data.DEMO_ACCOUNT_ID)
+
+    assert second.proposed_amount == Decimal("0.00")
+
+
 def test_approve_fails_when_the_operating_balance_is_short(db_session: Session) -> None:
     proposal = _pending(db_session)
     account = db_session.get(Account, demo_data.DEMO_ACCOUNT_ID)

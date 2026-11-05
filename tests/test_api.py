@@ -31,6 +31,7 @@ def test_page_offers_the_chat_and_the_decision_buttons(client: TestClient) -> No
     assert "/api/chat" in response.text
     assert 'data-decision="approve"' in response.text
     assert 'data-decision="reject"' in response.text
+    assert "proposed_amount) > 0" in response.text
 
 
 def test_chat_creates_a_pending_proposal_and_approve_moves_money_once(
@@ -87,6 +88,47 @@ def test_reject_leaves_the_balances_unchanged(client: TestClient, db_session: Se
     assert rejected.json()["transfer_id"] is None
     assert account.operating_balance == OPERATING_BALANCE
     assert account.reserve_balance == RESERVE_BALANCE
+
+
+def test_an_older_card_cannot_be_approved(client: TestClient, db_session: Session) -> None:
+    seed(db_session)
+    older = client.post("/api/chat", json={"message": "Set VAT aside."}).json()["proposal"]["id"]
+    client.post("/api/chat", json={"message": "Set VAT aside."})
+
+    response = client.post(f"/api/proposals/{older}/decision", json={"decision": "approve"})
+    account = get_snapshot(db_session, DEMO_ACCOUNT_ID).account
+
+    assert response.status_code == 409
+    assert "newer proposal" in response.json()["detail"]
+    assert account.operating_balance == OPERATING_BALANCE
+    assert account.reserve_balance == RESERVE_BALANCE
+
+
+def test_balance_endpoint_follows_an_approval(client: TestClient, db_session: Session) -> None:
+    seed(db_session)
+    before = client.get("/api/balance").json()
+    proposal_id = client.post("/api/chat", json={"message": "Set VAT aside."}).json()["proposal"]["id"]
+    client.post(f"/api/proposals/{proposal_id}/decision", json={"decision": "approve"})
+    after = client.get("/api/balance").json()
+
+    assert Decimal(before["operating_balance"]) == OPERATING_BALANCE
+    assert Decimal(before["reserve_balance"]) == RESERVE_BALANCE
+    assert Decimal(after["operating_balance"]) == Decimal("8415.00")
+    assert Decimal(after["reserve_balance"]) == Decimal("4085.00")
+
+
+def test_chat_after_approval_does_not_return_a_zero_card(
+    client: TestClient, db_session: Session
+) -> None:
+    seed(db_session)
+    proposal_id = client.post("/api/chat", json={"message": "Set VAT aside."}).json()["proposal"]["id"]
+    client.post(f"/api/proposals/{proposal_id}/decision", json={"decision": "approve"})
+
+    response = client.post("/api/chat", json={"message": "Set VAT aside."})
+
+    assert response.status_code == 200
+    assert response.json()["proposal"] is None
+    assert "nothing to move" in response.json()["reply"]
 
 
 def test_unknown_proposal_is_not_found(client: TestClient) -> None:

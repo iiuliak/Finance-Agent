@@ -54,6 +54,18 @@
       display: grid;
       gap: 0.75rem;
     }
+    .balances {
+      display: flex;
+      gap: 1.5rem;
+      padding: 0.6rem 0.85rem;
+      margin: 0 0 1rem;
+      border: 1px solid var(--line);
+      background: var(--card);
+    }
+    .balances p { margin: 0; }
+    .balances span { display: block; color: var(--muted); font-size: 0.8rem; }
+    .balances strong { font-size: 1.05rem; }
+    #reserve-balance { color: var(--reserve); }
     .figures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
     .figures span { display: block; color: var(--muted); font-size: 0.8rem; }
     .figures strong { font-size: 1.15rem; }
@@ -91,6 +103,10 @@
   <main>
     <h1>VAT reserve</h1>
     <p class="lede">Ask about your balance, invoices, expenses, or VAT. Nothing moves until you approve a card.</p>
+    <div class="balances" aria-live="polite">
+      <p><span>Operating account</span><strong id="operating-balance">–</strong></p>
+      <p><span>Tax reserve</span><strong id="reserve-balance">–</strong></p>
+    </div>
     <div id="transcript" aria-live="polite"></div>
     <form id="composer">
       <label for="message" class="lede">Message</label>
@@ -103,21 +119,55 @@
     const composer = document.querySelector("#composer");
     const messageBox = document.querySelector("#message");
     const sendButton = composer.querySelector("button");
+    const HISTORY_LIMIT = 20;
+    const history = [];
 
     function euros(value) {
       return new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR" }).format(Number(value));
     }
 
+    async function refreshBalances() {
+      try {
+        const response = await fetch("/api/balance");
+        if (!response.ok) return;
+        const body = await response.json();
+        document.querySelector("#operating-balance").textContent = euros(body.operating_balance);
+        document.querySelector("#reserve-balance").textContent = euros(body.reserve_balance);
+      } catch {
+        // The balance bar is informational; the chat still works without it.
+      }
+    }
+
     function addBubble(role, text) {
       const bubble = document.createElement("p");
       bubble.className = "bubble " + role;
-      bubble.textContent = text;
+      text.split(/\*\*(.+?)\*\*/g).forEach((part, index) => {
+        if (index % 2 === 1) {
+          const strong = document.createElement("strong");
+          strong.textContent = part;
+          bubble.appendChild(strong);
+        } else {
+          bubble.appendChild(document.createTextNode(part));
+        }
+      });
       transcript.appendChild(bubble);
     }
 
+    function retireOpenCards() {
+      transcript.querySelectorAll(".card.open").forEach((card) => {
+        card.classList.remove("open");
+        card.querySelectorAll("button").forEach((button) => button.remove());
+        const status = card.querySelector(".status");
+        status.hidden = false;
+        status.className = "error";
+        status.textContent = "Replaced by the newer proposal below.";
+      });
+    }
+
     function addCard(proposal) {
+      retireOpenCards();
       const card = document.createElement("article");
-      card.className = "card";
+      card.className = "card open";
       card.innerHTML = `
         <div class="figures">
           <p><span>VAT already due</span><strong></strong></p>
@@ -137,24 +187,51 @@
       amounts[2].textContent = euros(proposal.proposed_amount);
       card.querySelector(".explanation").textContent = proposal.explanation;
       const status = card.querySelector(".status");
+      if (Number(proposal.proposed_amount) === 0) {
+        card.classList.remove("open");
+        card.querySelector(".actions").remove();
+        status.hidden = false;
+        status.textContent = "Nothing to approve. Your reserve already covers the estimate.";
+        transcript.appendChild(card);
+        return;
+      }
       const buttons = [...card.querySelectorAll("button")];
       buttons.forEach((button) => {
-        button.addEventListener("click", () => decide(proposal.id, button.dataset.decision, buttons, status));
+        button.addEventListener("click", () => decide(proposal, button.dataset.decision, card, buttons, status));
       });
       transcript.appendChild(card);
     }
 
-    async function decide(proposalId, decision, buttons, status) {
+    const OUTCOMES = {
+      executed: (proposal) => Number(proposal.proposed_amount) > 0
+        ? "Approved. " + euros(proposal.proposed_amount) + " moved to your reserve."
+        : "Approved. Your reserve already covers the estimate, so nothing moved.",
+      rejected: () => "Rejected. No money moved.",
+      failed: () => "The operating account no longer holds enough. No money moved.",
+    };
+
+    async function decide(proposal, decision, card, buttons, status) {
       buttons.forEach((button) => { button.disabled = true; });
-      const response = await fetch("/api/proposals/" + proposalId + "/decision", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision }),
-      });
       status.hidden = false;
-      if (response.status === 409) {
+      let response;
+      try {
+        response = await fetch("/api/proposals/" + proposal.id + "/decision", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ decision }),
+        });
+      } catch {
         status.className = "error";
-        status.textContent = "This proposal was already decided.";
+        status.textContent = "The server could not be reached. Nothing was saved.";
+        buttons.forEach((button) => { button.disabled = false; });
+        return;
+      }
+      const body = await response.json().catch(() => ({}));
+      if (response.status === 409) {
+        card.classList.remove("open");
+        buttons.forEach((button) => button.remove());
+        status.className = "error";
+        status.textContent = body.detail || "This proposal was already decided.";
         return;
       }
       if (!response.ok) {
@@ -163,12 +240,11 @@
         buttons.forEach((button) => { button.disabled = false; });
         return;
       }
-      const body = await response.json();
+      card.classList.remove("open");
       buttons.forEach((button) => button.remove());
-      status.className = "status";
-      status.textContent = body.status === "executed"
-        ? "Approved. The transfer has been recorded."
-        : "Rejected. No money moved.";
+      refreshBalances();
+      status.className = body.status === "failed" ? "error" : "status";
+      status.textContent = (OUTCOMES[body.status] || (() => "Status: " + body.status))(proposal);
     }
 
     composer.addEventListener("submit", async (event) => {
@@ -182,20 +258,29 @@
         const response = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message }),
+          body: JSON.stringify({ message, history: history.slice(-HISTORY_LIMIT) }),
         });
-        const body = await response.json();
+        const body = await response.json().catch(() => ({}));
         if (!response.ok) {
           addBubble("assistant", body.detail || "The assistant could not answer.");
           return;
         }
-        if (body.proposal) addCard(body.proposal);
-        else addBubble("assistant", body.reply);
+        history.push({ role: "user", content: message });
+        if (body.reply) history.push({ role: "assistant", content: body.reply.slice(0, 4000) });
+        if (body.reply && (!body.proposal || body.reply !== body.proposal.explanation)) {
+          addBubble("assistant", body.reply);
+        }
+        if (body.proposal && Number(body.proposal.proposed_amount) > 0) addCard(body.proposal);
+      } catch {
+        addBubble("assistant", "The server could not be reached.");
       } finally {
         sendButton.disabled = false;
         messageBox.focus();
+        refreshBalances();
       }
     });
+
+    refreshBalances();
   </script>
 </body>
 </html>

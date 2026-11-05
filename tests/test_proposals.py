@@ -32,6 +32,22 @@ def test_template_copies_the_figures_it_is_given() -> None:
     assert "€3,585.00" in text
 
 
+def test_zero_proposal_says_there_is_nothing_to_move() -> None:
+    text = write_explanation(
+        ExplanationFacts(
+            collected_vat=Decimal("2850.00"),
+            input_vat=Decimal("285.00"),
+            additional_vat=Decimal("1520.00"),
+            reserve_balance=Decimal("4085.00"),
+            estimated_vat_due=Decimal("4085.00"),
+            proposed_amount=Decimal("0.00"),
+        )
+    )
+
+    assert "nothing to move" in text
+    assert "Move €0.00" not in text
+
+
 def test_generate_proposal_does_not_move_money(db_session: Session) -> None:
     seed(db_session)
     before = get_snapshot(db_session, demo_data.DEMO_ACCOUNT_ID)

@@ -12,10 +12,11 @@ from finance_agent.models import (
     ProposalStatus,
     TransferStatus,
 )
+from finance_agent.repositories.ledger import lock_account
 
 
 class ProposalConflict(Exception):
-    """The proposal was already decided, so this call changes nothing."""
+    """The proposal was already decided or superseded, so this call changes nothing."""
 
     def __init__(self, proposal_id: UUID, status: str) -> None:
         self.proposal_id = proposal_id
@@ -30,11 +31,16 @@ def decide(
     approver_id: UUID,
 ) -> ProposalDecisionResponse:
     """Approve or reject a pending proposal. Money moves only on a positive approval."""
-    proposal = session.scalar(
-        select(Proposal).where(Proposal.id == proposal_id).with_for_update()
-    )
-    if proposal is None:
+    account_id = session.scalar(select(Proposal.account_id).where(Proposal.id == proposal_id))
+    if account_id is None:
         raise LookupError(f"Proposal {proposal_id} not found")
+    account = lock_account(session, account_id)
+    proposal = session.scalar(
+        select(Proposal)
+        .where(Proposal.id == proposal_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
     if proposal.status != ProposalStatus.PENDING.value:
         raise ProposalConflict(proposal.id, proposal.status)
 
@@ -47,7 +53,7 @@ def decide(
     elif proposal.proposed_amount == 0:
         proposal.status = ProposalStatus.EXECUTED.value
     else:
-        transfer_id = _move_to_reserve(session, proposal)
+        transfer_id = _move_to_reserve(session, account, proposal)
 
     session.flush()
     return ProposalDecisionResponse(
@@ -57,12 +63,7 @@ def decide(
     )
 
 
-def _move_to_reserve(session: Session, proposal: Proposal) -> UUID | None:
-    account = session.scalar(
-        select(Account).where(Account.id == proposal.account_id).with_for_update()
-    )
-    if account is None:
-        raise LookupError(f"Account {proposal.account_id} not found")
+def _move_to_reserve(session: Session, account: Account, proposal: Proposal) -> UUID | None:
     if account.operating_balance < proposal.proposed_amount:
         proposal.status = ProposalStatus.FAILED.value
         return None

@@ -1,9 +1,11 @@
+import argparse
 from uuid import UUID
 
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from finance_agent import demo_data
-from finance_agent.db.orm import Account, Expense, Invoice, User
+from finance_agent.db.orm import Account, Expense, Invoice, Proposal, Transfer, User
 from finance_agent.db.session import SessionLocal
 
 
@@ -49,9 +51,30 @@ def seed(session: Session) -> UUID:
     return demo_data.DEMO_ACCOUNT_ID
 
 
+def reset(session: Session) -> UUID:
+    """Delete the demo account with its proposals and transfers, then seed it again."""
+    account_id = demo_data.DEMO_ACCOUNT_ID
+    proposal_ids = select(Proposal.id).where(Proposal.account_id == account_id)
+    session.execute(delete(Transfer).where(Transfer.proposal_id.in_(proposal_ids)))
+    session.execute(delete(Proposal).where(Proposal.account_id == account_id))
+    session.execute(delete(Invoice).where(Invoice.account_id == account_id))
+    session.execute(delete(Expense).where(Expense.account_id == account_id))
+    session.execute(delete(Account).where(Account.id == account_id))
+    session.execute(delete(User).where(User.id == demo_data.DEMO_USER_ID))
+    session.expunge_all()
+    return seed(session)
+
+
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Load the demo books.")
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="delete the demo account, its proposals and transfers, and start over",
+    )
+    args = parser.parse_args()
     with SessionLocal() as session, session.begin():
-        account_id = seed(session)
+        account_id = reset(session) if args.reset else seed(session)
     print(f"account_id {account_id}")
 
 

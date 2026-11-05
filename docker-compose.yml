@@ -15,5 +15,22 @@ services:
       timeout: 5s
       retries: 10
 
+  app:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://vat:vat@db:5432/vat
+      AS_OF_DATE: ${AS_OF_DATE:-2026-11-15}
+      LLM_MODE: ${LLM_MODE:-template}
+      OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "8000:8000"
+
 volumes:
   pgdata:

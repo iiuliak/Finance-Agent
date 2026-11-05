@@ -73,6 +73,7 @@ A transfer is inserted only by the approve decision:
 - Approve of a positive amount moves that amount from the operating balance to the reserve balance and sets the proposal to `executed`, in the same database transaction.
 - Approve of a zero amount sets the proposal to `executed` and inserts no transfer.
 - A second decision on the same proposal is rejected. The idempotency key of a transfer is the proposal id, and each proposal has at most one transfer.
+- Generating a proposal sets every other `pending` proposal for the account to `superseded`. A superseded proposal cannot be approved, because its amount was computed from balances that may have changed. At most one proposal per account is pending.
 
 The model writes the explanation only. It does not choose any amount.
 

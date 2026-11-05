@@ -1,4 +1,5 @@
 import re
+from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -8,13 +9,16 @@ from finance_agent.domain.money import format_euros
 from finance_agent.domain.periods import quarter_containing
 from finance_agent.models import VATProposalRead
 from finance_agent.repositories.ledger import get_snapshot
-from finance_agent.services.proposals import generate_proposal
+from finance_agent.services.proposals import draft_proposal, generate_proposal
 from finance_agent.settings import get_settings
 
 
 def answer(session: Session, account_id: UUID, message: str) -> tuple[str, VATProposalRead | None]:
     """Answer from the books. A proposal is prepared only when the message asks for one."""
     if _asks(message, "move", "transfer", "aside", "proposal"):
+        draft = draft_proposal(session, account_id)
+        if draft.proposed_amount == 0:
+            return draft.explanation, None
         proposal = generate_proposal(session, account_id)
         return proposal.explanation, proposal
 
@@ -44,7 +48,8 @@ def answer(session: Session, account_id: UUID, message: str) -> tuple[str, VATPr
         parts.append(
             f"VAT already due this quarter is {format_euros(so_far.vat_due)}. "
             f"That is {format_euros(so_far.collected_vat)} collected and "
-            f"{format_euros(so_far.input_vat)} of input VAT."
+            f"{format_euros(so_far.input_vat)} of input VAT. "
+            + _reserve_status(account.reserve_balance, forecast.estimated_vat_due)
         )
     if not parts:
         parts.append(
@@ -56,6 +61,18 @@ def answer(session: Session, account_id: UUID, message: str) -> tuple[str, VATPr
             "or ask me to move money into the reserve."
         )
     return " ".join(parts), None
+
+
+def _reserve_status(reserve_balance: Decimal, estimated_vat_due: Decimal) -> str:
+    if reserve_balance >= estimated_vat_due:
+        return (
+            f"Your reserve holds {format_euros(reserve_balance)}, which already covers the "
+            f"estimated {format_euros(estimated_vat_due)} at quarter end."
+        )
+    return (
+        f"Your reserve holds {format_euros(reserve_balance)}, less than the estimated "
+        f"{format_euros(estimated_vat_due)} at quarter end. Ask me to move money into the reserve."
+    )
 
 
 def _asks(message: str, *words: str) -> bool:

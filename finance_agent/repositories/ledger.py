@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from finance_agent.db.orm import Account, Expense, Invoice, Proposal
@@ -20,6 +20,32 @@ def get_account(session: Session, account_id: UUID) -> AccountRead:
     if row is None:
         raise LookupError(f"Account {account_id} not found")
     return AccountRead.model_validate(row)
+
+
+def lock_account(session: Session, account_id: UUID) -> Account:
+    """Row-lock the account. Proposal generation and decisions both take this lock first."""
+    row = session.scalar(
+        select(Account)
+        .where(Account.id == account_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if row is None:
+        raise LookupError(f"Account {account_id} not found")
+    return row
+
+
+def supersede_pending_proposals(session: Session, account_id: UUID) -> None:
+    """A pending proposal was computed from older balances, so it must not be approved later."""
+    session.execute(
+        update(Proposal)
+        .where(
+            Proposal.account_id == account_id,
+            Proposal.status == ProposalStatus.PENDING.value,
+        )
+        .values(status=ProposalStatus.SUPERSEDED.value)
+        .execution_options(synchronize_session="fetch")
+    )
 
 
 def list_invoices(session: Session, account_id: UUID) -> list[InvoiceRead]:
