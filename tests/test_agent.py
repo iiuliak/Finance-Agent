@@ -37,6 +37,8 @@ def test_template_turn_answers_without_preparing_a_proposal(db_session: Session)
     assert invoices.proposal is None
     assert "unpaid" in invoices.reply
     assert "€8,000.00" in invoices.reply
+    assert "2026-12-10" not in invoices.reply
+    assert "2027-01-05" not in invoices.reply
     assert db_session.scalar(select(func.count()).select_from(Proposal)) == 0
     assert db_session.scalar(select(func.count()).select_from(Transfer)) == 0
 

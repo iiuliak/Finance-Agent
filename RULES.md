@@ -4,9 +4,9 @@ These rules are the contract for the demo. The calculation, the forecast, the ca
 
 ## Clock
 
-The demo date is **15 November 2026**, read from the `AS_OF_DATE` setting. The app does not use the wall clock.
+The books open on **15 November 2026**. `AS_OF_DATE` sets that starting day when the demo account is seeded. After that, the day lives on the account, and the page can move it. The app does not use the wall clock.
 
-That date falls in the fourth calendar quarter:
+The chosen day selects the quarter. 15 November 2026 falls in the fourth calendar quarter:
 
 - `period_start`: 1 October 2026, inclusive
 - `period_end`: 1 January 2027, exclusive
@@ -23,15 +23,18 @@ VAT is due when the invoice is paid (cash basis), and the return is quarterly.
 
 ## Forecast
 
-The forecast estimates VAT still to come from invoices that are open on `AS_OF_DATE`.
+The forecast estimates VAT still to come from invoices that are open on the chosen day.
 
-The forecast only sees the books as they were on `AS_OF_DATE`. A payment dated after `AS_OF_DATE` is treated as not yet paid, and an expense dated after it is ignored. VAT due so far uses the same view.
+The database stores each invoice's real payment date. The forecast only sees the books as they stood on the chosen day. A payment dated after that day is treated as not yet paid, and an expense dated after it is ignored. VAT due so far uses the same view. The agent tools use that view too, so a later payment date is not something the model can read.
 
 Count an invoice as additional VAT only when all of these are true:
 
-- it is unpaid as of `AS_OF_DATE`
+- it is unpaid as of the chosen day
 - `expected_payment_date` is set
+- the expected day is still ahead: `expected_payment_date >= as_of`
 - `period_start <= expected_payment_date < period_end`
+
+Once the expected day has passed and the invoice is still unpaid, it is no longer counted as coming this quarter.
 
 Do not invent future expenses. The estimate uses net VAT before flooring at zero, so input VAT already recorded reduces it:
 
@@ -84,14 +87,14 @@ One account:
 - Operating balance: €12,000
 - Reserve balance: €500
 
-Invoices, all at 19% VAT. The live database stores the "known on 15 November" payment date. The true payment date is used only by the forecast evaluation.
+Invoices, all at 19% VAT. The database stores the real payment date. On 15 November the last two are still in the future, so the agent treats them as unpaid.
 
-| Net | Issued | Known payment on 15 Nov 2026 | Expected payment | True payment |
+| Net | Issued | Real payment | Expected payment | Visible on 15 Nov 2026 |
 | --- | --- | --- | --- | --- |
-| €10,000 | 1 Oct 2026 | 5 Oct 2026 | 5 Oct 2026 | 5 Oct 2026 |
-| €5,000 | 20 Oct 2026 | 2 Nov 2026 | 2 Nov 2026 | 2 Nov 2026 |
-| €8,000 | 1 Nov 2026 | unpaid | 30 Nov 2026 | 5 Jan 2027 |
-| €2,000 | 10 Nov 2026 | unpaid | 15 Jan 2027 | 10 Dec 2026 |
+| €10,000 | 1 Oct 2026 | 5 Oct 2026 | 5 Oct 2026 | paid |
+| €5,000 | 20 Oct 2026 | 2 Nov 2026 | 2 Nov 2026 | paid |
+| €8,000 | 1 Nov 2026 | 5 Jan 2027 | 30 Nov 2026 | unpaid |
+| €2,000 | 10 Nov 2026 | 10 Dec 2026 | 15 Jan 2027 | unpaid |
 
 VAT on those invoices is €1,900, €950, €1,520, and €380.
 
@@ -115,4 +118,17 @@ Figures every test should reproduce:
 | True quarter-end VAT | €2,945 |
 | Absolute forecast error | €1,140 |
 
-After a successful approve: operating balance €8,415, reserve balance €4,085, one completed transfer of €3,585.
+The forecast check always scores 15 November, even when the page is standing on another day.
+
+On 10 December the €2,000 invoice has been paid and the €8,000 invoice's expected day has passed:
+
+| Figure | Amount |
+| --- | --- |
+| VAT already due | €2,945 |
+| Additional VAT in the forecast | €0 |
+| Estimated quarter-end VAT | €2,945 |
+| Proposed transfer | €2,445 |
+
+On 5 November the visible books match 15 November, so the card is unchanged.
+
+After a successful approve of the 15 November proposal: operating balance €8,415, reserve balance €4,085, one completed transfer of €3,585.

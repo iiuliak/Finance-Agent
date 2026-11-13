@@ -2,7 +2,7 @@
 
 An agent that tells a freelancer how much of their balance is VAT and proposes moving it into a tax reserve. It never moves money without the user's confirmation.
 
-The demo books are synthetic: one account, four invoices, two expenses, quarterly VAT on a cash basis (VAT is due when an invoice is paid). The demo date is fixed at 15 November 2026. [RULES.md](RULES.md) is the full contract, including the answer key every test reproduces.
+The demo books are synthetic: one account, four invoices, two expenses, quarterly VAT on a cash basis (VAT is due when an invoice is paid). They open on 15 November 2026. The page can move that day, and it can add or delete invoices and expenses or change the two balances. A payment dated after the chosen day is hidden from the agent until the day reaches it. [RULES.md](RULES.md) is the full contract, including the answer key every test reproduces.
 
 ## Run it with Docker
 
@@ -12,7 +12,9 @@ You need Docker Desktop (or any Docker with Compose v2).
 docker compose up --build
 ```
 
-Open <http://localhost:8000> and ask "How much should I move to my VAT reserve?". A card shows VAT already due (€2,565), the estimated VAT at quarter end (€4,085) and the proposed transfer (€3,585). Approve moves the money; Reject leaves everything as it is.
+Open <http://localhost:8000>. The books open on 15 November 2026. Ask "How much should I move to my VAT reserve?". A card shows VAT already due (€2,565), the estimated VAT at quarter end (€4,085) and the proposed transfer (€3,585). Approve moves the money; Reject leaves everything as it is.
+
+The same panel can move the day. On 10 December the €2,000 invoice has been paid, VAT already due is €2,945, and the missed €8,000 invoice drops out of the forecast. On 5 November the card matches 15 November. Adding an invoice or an expense, or editing either balance, updates those figures. A card that was already on screen is withdrawn, because its amount was computed from the old books.
 
 On startup the container applies the migrations and loads the demo books if they are missing. To start the demo over after approving:
 
@@ -65,7 +67,7 @@ The model never does arithmetic and never chooses an amount. It can call five to
 
 ## How we show it works
 
-Forecast error against the true VAT in the synthetic data:
+Forecast error against the true VAT in the synthetic data. This check always stands on 15 November, whichever day the page is using:
 
 ```bash
 python -m finance_agent.eval_forecast

@@ -32,6 +32,10 @@ def test_page_offers_the_chat_and_the_decision_buttons(client: TestClient) -> No
     assert 'data-decision="approve"' in response.text
     assert 'data-decision="reject"' in response.text
     assert "proposed_amount) > 0" in response.text
+    assert 'id="as-of"' in response.text
+    assert "/api/invoices" in response.text
+    assert "/api/expenses" in response.text
+    assert "/api/balances" in response.text
 
 
 def test_chat_creates_a_pending_proposal_and_approve_moves_money_once(
@@ -99,7 +103,7 @@ def test_an_older_card_cannot_be_approved(client: TestClient, db_session: Sessio
     account = get_snapshot(db_session, DEMO_ACCOUNT_ID).account
 
     assert response.status_code == 409
-    assert "newer proposal" in response.json()["detail"]
+    assert "out of date" in response.json()["detail"]
     assert account.operating_balance == OPERATING_BALANCE
     assert account.reserve_balance == RESERVE_BALANCE
 

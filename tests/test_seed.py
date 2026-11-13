@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -29,6 +30,13 @@ def test_seed_matches_the_answer_key(db_session: Session) -> None:
         snapshot.account.reserve_balance,
     )
 
+    assert snapshot.account.as_of_date == date(2026, 11, 15)
+    assert [invoice.payment_date for invoice in snapshot.invoices] == [
+        date(2026, 10, 5),
+        date(2026, 11, 2),
+        date(2027, 1, 5),
+        date(2026, 12, 10),
+    ]
     assert [invoice.vat_amount for invoice in snapshot.invoices] == [
         Decimal("1900.00"),
         Decimal("950.00"),

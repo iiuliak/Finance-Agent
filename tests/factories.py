@@ -40,12 +40,12 @@ def make_expense(on: date, gross: str, input_vat: str) -> ExpenseRead:
     )
 
 
-def demo_invoices(use_true_payment_dates: bool = False) -> list[InvoiceRead]:
+def demo_invoices() -> list[InvoiceRead]:
     return [
         make_invoice(
             str(invoice.net_amount),
             invoice.issue_date,
-            paid=invoice.true_payment_date if use_true_payment_dates else invoice.payment_date,
+            paid=invoice.payment_date,
             expected=invoice.expected_payment_date,
         )
         for invoice in demo_data.INVOICES

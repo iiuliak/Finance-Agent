@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from finance_agent import demo_data
 from finance_agent.db.orm import Account, Expense, Invoice, Proposal, Transfer, User
 from finance_agent.db.session import SessionLocal
+from finance_agent.settings import get_settings
 
 
 def seed(session: Session) -> UUID:
@@ -22,6 +23,7 @@ def seed(session: Session) -> UUID:
             user_id=demo_data.DEMO_USER_ID,
             operating_balance=demo_data.OPERATING_BALANCE,
             reserve_balance=demo_data.RESERVE_BALANCE,
+            as_of_date=get_settings().as_of_date,
         )
     )
     session.flush()

@@ -13,14 +13,13 @@ from finance_agent.repositories.ledger import (
     supersede_pending_proposals,
 )
 from finance_agent.services.explain import ExplanationFacts, write_explanation
-from finance_agent.settings import get_settings
 
 
 def draft_proposal(session: Session, account_id: UUID) -> VATProposalDraft:
     """Compute the figures for a proposal. Does not write a row and does not move money."""
-    as_of = get_settings().as_of_date
     lock_account(session, account_id)
     snapshot = get_snapshot(session, account_id)
+    as_of = snapshot.account.as_of_date
     period = quarter_containing(as_of)
     so_far = vat_so_far(period, as_of, snapshot.invoices, snapshot.expenses)
     forecast = forecast_vat(period, as_of, snapshot.invoices, snapshot.expenses)
@@ -31,6 +30,7 @@ def draft_proposal(session: Session, account_id: UUID) -> VATProposalDraft:
     )
     explanation = write_explanation(
         ExplanationFacts(
+            as_of=as_of,
             collected_vat=so_far.collected_vat,
             input_vat=so_far.input_vat,
             additional_vat=forecast.expected_additional_vat,

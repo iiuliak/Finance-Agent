@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 from sqlalchemy import func, select
@@ -15,6 +16,7 @@ from finance_agent.services.proposals import generate_proposal
 def test_template_copies_the_figures_it_is_given() -> None:
     text = write_explanation(
         ExplanationFacts(
+            as_of=date(2026, 11, 15),
             collected_vat=Decimal("2850.00"),
             input_vat=Decimal("285.00"),
             additional_vat=Decimal("1520.00"),
@@ -35,6 +37,7 @@ def test_template_copies_the_figures_it_is_given() -> None:
 def test_zero_proposal_says_there_is_nothing_to_move() -> None:
     text = write_explanation(
         ExplanationFacts(
+            as_of=date(2026, 11, 15),
             collected_vat=Decimal("2850.00"),
             input_vat=Decimal("285.00"),
             additional_vat=Decimal("1520.00"),

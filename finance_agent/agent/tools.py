@@ -5,12 +5,11 @@ from uuid import UUID
 from langchain_core.tools import BaseTool, tool
 from sqlalchemy.orm import Session
 
-from finance_agent.domain.forecast import forecast_vat, vat_so_far
+from finance_agent.domain.forecast import forecast_vat, known_as_of, vat_so_far
 from finance_agent.domain.periods import quarter_containing
 from finance_agent.domain.proposal import proposed_reserve_transfer
-from finance_agent.repositories.ledger import get_account, get_snapshot, list_expenses, list_invoices
+from finance_agent.repositories.ledger import get_account, get_snapshot
 from finance_agent.services.proposals import draft_proposal, generate_proposal
-from finance_agent.settings import get_settings
 
 READ_TOOL_NAMES = ("get_invoices", "get_expenses", "get_balance", "get_vat_summary")
 TRANSFER_TOOL_NAME = "transfer_to_reserve"
@@ -23,8 +22,14 @@ def build_tools(session: Session, account_id: UUID) -> list[BaseTool]:
 
     @tool
     def get_invoices() -> str:
-        """List this account's invoices, including each invoice's VAT and payment dates."""
-        invoices = list_invoices(session, account_id)
+        """List this account's invoices as of the chosen day, including each invoice's VAT.
+
+        A payment dated after that day is omitted, so the invoice looks unpaid.
+        """
+        snapshot = get_snapshot(session, account_id)
+        invoices, _expenses = known_as_of(
+            snapshot.account.as_of_date, snapshot.invoices, snapshot.expenses
+        )
         return json.dumps(
             {
                 "currency": CURRENCY,
@@ -34,8 +39,14 @@ def build_tools(session: Session, account_id: UUID) -> list[BaseTool]:
 
     @tool
     def get_expenses() -> str:
-        """List this account's expenses, including the input VAT on each one."""
-        expenses = list_expenses(session, account_id)
+        """List this account's expenses as of the chosen day, including each one's input VAT.
+
+        An expense dated after that day is omitted.
+        """
+        snapshot = get_snapshot(session, account_id)
+        _invoices, expenses = known_as_of(
+            snapshot.account.as_of_date, snapshot.invoices, snapshot.expenses
+        )
         return json.dumps(
             {
                 "currency": CURRENCY,
@@ -62,8 +73,8 @@ def build_tools(session: Session, account_id: UUID) -> list[BaseTool]:
         the reserve balance, whether the reserve covers the estimate, and the transfer that
         would fill the gap.
         """
-        as_of = get_settings().as_of_date
         snapshot = get_snapshot(session, account_id)
+        as_of = snapshot.account.as_of_date
         period = quarter_containing(as_of)
         so_far = vat_so_far(period, as_of, snapshot.invoices, snapshot.expenses)
         forecast = forecast_vat(period, as_of, snapshot.invoices, snapshot.expenses)

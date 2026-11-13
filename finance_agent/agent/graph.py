@@ -15,6 +15,7 @@ from finance_agent.agent.state import AgentState, ChatTurn
 from finance_agent.agent.template import answer
 from finance_agent.agent.tools import TRANSFER_TOOL_NAME, build_tools
 from finance_agent.models import VATProposalRead
+from finance_agent.repositories.ledger import get_account
 from finance_agent.settings import get_settings
 
 _SYSTEM_PROMPT = (
@@ -94,11 +95,13 @@ def _openai_graph(session: Session):
 
     def call_model(state: AgentState) -> dict:
         tools = build_tools(session, state["account_id"])
+        as_of = get_account(session, state["account_id"]).as_of_date
         message = _complete(
             [
                 SystemMessage(
-                    content=f"{_SYSTEM_PROMPT} Today is {settings.as_of_date.isoformat()}; "
-                    "the current quarter has not ended yet."
+                    content=f"{_SYSTEM_PROMPT} The books are being read as of {as_of.isoformat()}. "
+                    "Treat that as today. A payment after that day has not happened yet, "
+                    "and the current quarter has not ended yet."
                 ),
                 *state["messages"],
             ],

@@ -53,6 +53,7 @@ def forecast_vat(
         if (
             invoice.payment_date is None
             and expected_on is not None
+            and expected_on >= as_of
             and period.period_start <= expected_on < period.period_end
         ):
             additional += invoice.vat_amount

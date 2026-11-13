@@ -4,13 +4,12 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from finance_agent.domain.forecast import forecast_vat, vat_so_far
+from finance_agent.domain.forecast import forecast_vat, known_as_of, vat_so_far
 from finance_agent.domain.money import format_euros
-from finance_agent.domain.periods import quarter_containing
+from finance_agent.domain.periods import format_day, quarter_containing
 from finance_agent.models import VATProposalRead
 from finance_agent.repositories.ledger import get_snapshot
 from finance_agent.services.proposals import draft_proposal, generate_proposal
-from finance_agent.settings import get_settings
 
 
 def answer(session: Session, account_id: UUID, message: str) -> tuple[str, VATProposalRead | None]:
@@ -23,10 +22,11 @@ def answer(session: Session, account_id: UUID, message: str) -> tuple[str, VATPr
         return proposal.explanation, proposal
 
     snapshot = get_snapshot(session, account_id)
-    as_of = get_settings().as_of_date
+    as_of = snapshot.account.as_of_date
     period = quarter_containing(as_of)
-    so_far = vat_so_far(period, as_of, snapshot.invoices, snapshot.expenses)
-    forecast = forecast_vat(period, as_of, snapshot.invoices, snapshot.expenses)
+    invoices, expenses = known_as_of(as_of, snapshot.invoices, snapshot.expenses)
+    so_far = vat_so_far(period, as_of, invoices, expenses)
+    forecast = forecast_vat(period, as_of, invoices, expenses)
     account = snapshot.account
 
     parts: list[str] = []
@@ -36,9 +36,9 @@ def answer(session: Session, account_id: UUID, message: str) -> tuple[str, VATPr
             f"The reserve holds {format_euros(account.reserve_balance)}."
         )
     if _asks(message, "invoice", "invoices", "unpaid", "paid"):
-        parts.append(_invoices(snapshot.invoices))
+        parts.append(_invoices(invoices))
     if _asks(message, "expense", "expenses", "spent", "spend"):
-        parts.append(_expenses(snapshot.expenses))
+        parts.append(_expenses(expenses))
     if _asks(message, "forecast", "quarter", "estimate"):
         parts.append(
             f"Estimated VAT at quarter end is {format_euros(forecast.estimated_vat_due)}. "
@@ -46,14 +46,14 @@ def answer(session: Session, account_id: UUID, message: str) -> tuple[str, VATPr
         )
     if _asks(message, "vat", "owe", "due", "tax"):
         parts.append(
-            f"VAT already due this quarter is {format_euros(so_far.vat_due)}. "
+            f"As of {format_day(as_of)}, VAT already due this quarter is {format_euros(so_far.vat_due)}. "
             f"That is {format_euros(so_far.collected_vat)} collected and "
             f"{format_euros(so_far.input_vat)} of input VAT. "
             + _reserve_status(account.reserve_balance, forecast.estimated_vat_due)
         )
     if not parts:
         parts.append(
-            f"The operating account holds {format_euros(account.operating_balance)} "
+            f"As of {format_day(as_of)}, the operating account holds {format_euros(account.operating_balance)} "
             f"and the reserve holds {format_euros(account.reserve_balance)}. "
             f"VAT already due this quarter is {format_euros(so_far.vat_due)}. "
             f"Estimated VAT at quarter end is {format_euros(forecast.estimated_vat_due)}. "

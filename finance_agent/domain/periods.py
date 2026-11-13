@@ -3,6 +3,25 @@ from datetime import date
 from finance_agent.models import VATPeriod
 
 _QUARTER_START_MONTHS = (1, 4, 7, 10)
+_MONTHS = (
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+)
+
+
+def format_day(value: date) -> str:
+    """15 November 2026. Month names stay in English regardless of the machine locale."""
+    return f"{value.day} {_MONTHS[value.month - 1]} {value.year}"
 
 
 def quarter_containing(as_of: date) -> VATPeriod:

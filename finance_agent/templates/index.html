@@ -24,12 +24,26 @@
       font: 16px/1.45 "Iowan Old Style", Palatino, Georgia, serif;
     }
     main {
-      max-width: 40rem;
+      max-width: 68rem;
       margin: 0 auto;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
       padding: 1.5rem 1rem 1rem;
+    }
+    .layout {
+      flex: 1;
+      display: grid;
+      gap: 1.5rem;
+      align-items: start;
+    }
+    @media (min-width: 900px) {
+      .layout { grid-template-columns: 24rem 1fr; }
+    }
+    .chat {
+      display: flex;
+      flex-direction: column;
+      min-height: 70vh;
     }
     h1 { font-size: 1.4rem; font-weight: 600; margin: 0 0 0.25rem; }
     .lede { color: var(--muted); margin: 0 0 1rem; }
@@ -66,6 +80,36 @@
     .balances span { display: block; color: var(--muted); font-size: 0.8rem; }
     .balances strong { font-size: 1.05rem; }
     #reserve-balance { color: var(--reserve); }
+    .books h2 { font-size: 1.1rem; font-weight: 600; margin: 0 0 0.75rem; }
+    .books h3 { font-size: 0.95rem; font-weight: 600; margin: 1rem 0 0.4rem; }
+    .books form, .editor {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.45rem 0.6rem;
+      margin: 0 0 0.75rem;
+    }
+    .books label { display: grid; gap: 0.15rem; color: var(--muted); font-size: 0.8rem; }
+    .books label.wide, .books form > button { grid-column: 1 / -1; justify-self: start; }
+    input {
+      font: inherit;
+      color: inherit;
+      width: 100%;
+      padding: 0.35rem 0.45rem;
+      border: 1px solid var(--line);
+      background: var(--card);
+    }
+    .books .figures { grid-template-columns: 1fr 1fr; margin-bottom: 0.75rem; }
+    .ledger { list-style: none; margin: 0 0 0.5rem; padding: 0; }
+    .ledger li {
+      display: flex;
+      justify-content: space-between;
+      gap: 0.6rem;
+      align-items: start;
+      padding: 0.45rem 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .ledger p { margin: 0; }
+    .ledger button { padding: 0.2rem 0.45rem; }
     .figures { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.75rem; }
     .figures span { display: block; color: var(--muted); font-size: 0.8rem; }
     .figures strong { font-size: 1.15rem; }
@@ -102,7 +146,69 @@
 <body>
   <main>
     <h1>VAT reserve</h1>
-    <p class="lede">Ask about your balance, invoices, expenses, or VAT. Nothing moves until you approve a card.</p>
+    <p class="lede">Change the day or the books, then ask about VAT. Nothing moves until you approve a card.</p>
+    <div class="layout">
+    <section class="books" aria-label="Books">
+      <h2>Books</h2>
+      <form id="day-form">
+        <label class="wide">As of
+          <input id="as-of" name="as_of" type="date" required>
+        </label>
+        <button type="submit">Use this day</button>
+      </form>
+      <p class="lede" id="day-label">Payments and expenses after this day stay in the list. The agent treats them as not yet happened. An expected payment counts only while that day is still ahead.</p>
+      <div class="figures" id="today" aria-live="polite">
+        <p><span>VAT already due</span><strong id="due-now">–</strong></p>
+        <p><span>Still expected</span><strong id="expected-now">–</strong></p>
+        <p><span>Estimated at quarter end</span><strong id="estimate-now">–</strong></p>
+        <p><span>Proposed transfer</span><strong id="proposed-now">–</strong></p>
+      </div>
+      <form id="balance-form">
+        <label>Operating account
+          <input id="operating-input" name="operating_balance" inputmode="decimal" required>
+        </label>
+        <label>Tax reserve
+          <input id="reserve-input" name="reserve_balance" inputmode="decimal" required>
+        </label>
+        <button type="submit">Save balances</button>
+      </form>
+      <h3>Invoices</h3>
+      <ul class="ledger" id="invoices"></ul>
+      <form id="invoice-form" class="editor">
+        <label>Net amount
+          <input name="net_amount" inputmode="decimal" required placeholder="1000.00">
+        </label>
+        <label>VAT rate
+          <input name="vat_rate" inputmode="decimal" required value="0.19">
+        </label>
+        <label>Issued
+          <input name="issue_date" type="date" required>
+        </label>
+        <label>Paid
+          <input name="payment_date" type="date">
+        </label>
+        <label class="wide">Expected payment
+          <input name="expected_payment_date" type="date">
+        </label>
+        <button type="submit">Add invoice</button>
+      </form>
+      <h3>Expenses</h3>
+      <ul class="ledger" id="expenses"></ul>
+      <form id="expense-form" class="editor">
+        <label>Date
+          <input name="expense_date" type="date" required>
+        </label>
+        <label>Gross amount
+          <input name="gross_amount" inputmode="decimal" required placeholder="1190.00">
+        </label>
+        <label class="wide">Input VAT
+          <input name="input_vat_amount" inputmode="decimal" required placeholder="190.00">
+        </label>
+        <button type="submit">Add expense</button>
+      </form>
+      <p id="books-error" class="error" hidden></p>
+    </section>
+    <section class="chat">
     <div class="balances" aria-live="polite">
       <p><span>Operating account</span><strong id="operating-balance">–</strong></p>
       <p><span>Tax reserve</span><strong id="reserve-balance">–</strong></p>
@@ -113,29 +219,211 @@
       <textarea id="message" name="message" required placeholder="How much VAT do I owe, and what is in the reserve?"></textarea>
       <button type="submit">Send</button>
     </form>
+    </section>
+    </div>
   </main>
   <script>
     const transcript = document.querySelector("#transcript");
     const composer = document.querySelector("#composer");
     const messageBox = document.querySelector("#message");
     const sendButton = composer.querySelector("button");
+    const booksError = document.querySelector("#books-error");
     const HISTORY_LIMIT = 20;
     const history = [];
+    const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    let booksFingerprint = "";
+
+    function setIfIdle(selector, value) {
+      const field = document.querySelector(selector);
+      if (document.activeElement !== field) field.value = value;
+    }
+
+    function dayLabel(iso) {
+      const [year, month, day] = iso.split("-");
+      return Number(day) + " " + MONTHS[Number(month) - 1] + " " + year;
+    }
+
+    function optionalDate(value) {
+      return value || null;
+    }
+
+    function problem(payload) {
+      if (typeof payload.detail === "string") return payload.detail;
+      if (Array.isArray(payload.detail)) {
+        const text = payload.detail.map((item) => item.msg).filter(Boolean).join(" ");
+        if (text) return text;
+      }
+      return "The change could not be saved.";
+    }
+
+    function showBooksError(text) {
+      booksError.hidden = !text;
+      booksError.textContent = text || "";
+    }
+
+    function fingerprint(books) {
+      return JSON.stringify({
+        as_of: books.as_of,
+        operating_balance: books.operating_balance,
+        reserve_balance: books.reserve_balance,
+        invoices: books.invoices.map((invoice) => [invoice.id, invoice.payment_date, invoice.expected_payment_date, invoice.net_amount]),
+        expenses: books.expenses.map((expense) => [expense.id, expense.expense_date, expense.gross_amount, expense.input_vat_amount]),
+      });
+    }
+
+    function invoiceState(invoice, asOf) {
+      const later = invoice.payment_date && invoice.payment_date > asOf
+        ? " Paid " + invoice.payment_date + ", which is after this day."
+        : "";
+      if (!invoice.payment_date || invoice.payment_date > asOf) {
+        const expected = invoice.expected_payment_date ? " Expected " + invoice.expected_payment_date + "." : "";
+        return "Open on this day." + expected + later;
+      }
+      return "Paid " + invoice.payment_date + ".";
+    }
+
+    function paint(books) {
+      const next = fingerprint(books);
+      if (booksFingerprint && next !== booksFingerprint) {
+        withdrawOpenCards("The books changed, so this card was withdrawn.");
+      }
+      booksFingerprint = next;
+      document.querySelector("#day-label").textContent = "Reading the books as of " + dayLabel(books.as_of)
+        + ". Payments and expenses after this day stay in the list. The agent treats them as not yet happened. An expected payment counts only while that day is still ahead.";
+      setIfIdle("#as-of", books.as_of);
+      setIfIdle("#operating-input", books.operating_balance);
+      setIfIdle("#reserve-input", books.reserve_balance);
+      document.querySelector("#operating-balance").textContent = euros(books.operating_balance);
+      document.querySelector("#reserve-balance").textContent = euros(books.reserve_balance);
+      document.querySelector("#due-now").textContent = euros(books.vat_due);
+      document.querySelector("#expected-now").textContent = euros(books.expected_additional_vat);
+      document.querySelector("#estimate-now").textContent = euros(books.forecast_vat);
+      document.querySelector("#proposed-now").textContent = euros(books.proposed_amount);
+
+      const invoices = document.querySelector("#invoices");
+      invoices.replaceChildren();
+      books.invoices.forEach((invoice) => {
+        const item = document.createElement("li");
+        const text = document.createElement("p");
+        text.textContent = euros(invoice.net_amount) + " net, VAT " + euros(invoice.vat_amount)
+          + ", issued " + invoice.issue_date + ". " + invoiceState(invoice, books.as_of);
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "secondary";
+        button.textContent = "Delete";
+        button.addEventListener("click", () => save("/api/invoices/" + invoice.id, "DELETE"));
+        item.append(text, button);
+        invoices.appendChild(item);
+      });
+
+      const expenses = document.querySelector("#expenses");
+      expenses.replaceChildren();
+      books.expenses.forEach((expense) => {
+        const item = document.createElement("li");
+        const text = document.createElement("p");
+        const counted = expense.expense_date > books.as_of ? " After this day, so it is not counted yet." : "";
+        text.textContent = expense.expense_date + ": " + euros(expense.gross_amount)
+          + " gross, input VAT " + euros(expense.input_vat_amount) + "." + counted;
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "secondary";
+        button.textContent = "Delete";
+        button.addEventListener("click", () => save("/api/expenses/" + expense.id, "DELETE"));
+        item.append(text, button);
+        expenses.appendChild(item);
+      });
+    }
+
+    async function loadBooks() {
+      try {
+        const response = await fetch("/api/books");
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          showBooksError(problem(payload));
+          return;
+        }
+        showBooksError("");
+        paint(payload);
+      } catch {
+        showBooksError("The server could not be reached.");
+      }
+    }
+
+    async function save(url, method, body) {
+      let response;
+      try {
+        response = await fetch(url, {
+          method,
+          headers: body === undefined ? {} : { "Content-Type": "application/json" },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+      } catch {
+        showBooksError("The server could not be reached.");
+        return;
+      }
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        showBooksError(problem(payload));
+        return;
+      }
+      showBooksError("");
+      paint(payload);
+      return true;
+    }
+
+    document.querySelector("#day-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      save("/api/as-of", "PUT", { as_of: document.querySelector("#as-of").value });
+    });
+
+    document.querySelector("#balance-form").addEventListener("submit", (event) => {
+      event.preventDefault();
+      const data = new FormData(event.target);
+      save("/api/balances", "PUT", {
+        operating_balance: data.get("operating_balance"),
+        reserve_balance: data.get("reserve_balance"),
+      });
+    });
+
+    document.querySelector("#invoice-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = new FormData(event.target);
+      const saved = await save("/api/invoices", "POST", {
+        net_amount: data.get("net_amount"),
+        vat_rate: data.get("vat_rate"),
+        issue_date: data.get("issue_date"),
+        payment_date: optionalDate(data.get("payment_date")),
+        expected_payment_date: optionalDate(data.get("expected_payment_date")),
+      });
+      if (!saved) return;
+      event.target.reset();
+      event.target.elements.vat_rate.value = "0.19";
+    });
+
+    document.querySelector("#expense-form").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const data = new FormData(event.target);
+      const saved = await save("/api/expenses", "POST", {
+        expense_date: data.get("expense_date"),
+        gross_amount: data.get("gross_amount"),
+        input_vat_amount: data.get("input_vat_amount"),
+      });
+      if (saved) event.target.reset();
+    });
 
     function euros(value) {
       return new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR" }).format(Number(value));
     }
 
-    async function refreshBalances() {
-      try {
-        const response = await fetch("/api/balance");
-        if (!response.ok) return;
-        const body = await response.json();
-        document.querySelector("#operating-balance").textContent = euros(body.operating_balance);
-        document.querySelector("#reserve-balance").textContent = euros(body.reserve_balance);
-      } catch {
-        // The balance bar is informational; the chat still works without it.
-      }
+    function withdrawOpenCards(text) {
+      transcript.querySelectorAll(".card.open").forEach((card) => {
+        card.classList.remove("open");
+        card.querySelectorAll("button").forEach((button) => button.remove());
+        const status = card.querySelector(".status");
+        status.hidden = false;
+        status.className = "error";
+        status.textContent = text;
+      });
     }
 
     function addBubble(role, text) {
@@ -154,14 +442,7 @@
     }
 
     function retireOpenCards() {
-      transcript.querySelectorAll(".card.open").forEach((card) => {
-        card.classList.remove("open");
-        card.querySelectorAll("button").forEach((button) => button.remove());
-        const status = card.querySelector(".status");
-        status.hidden = false;
-        status.className = "error";
-        status.textContent = "Replaced by the newer proposal below.";
-      });
+      withdrawOpenCards("Replaced by the newer proposal below.");
     }
 
     function addCard(proposal) {
@@ -242,7 +523,7 @@
       }
       card.classList.remove("open");
       buttons.forEach((button) => button.remove());
-      refreshBalances();
+      loadBooks();
       status.className = body.status === "failed" ? "error" : "status";
       status.textContent = (OUTCOMES[body.status] || (() => "Status: " + body.status))(proposal);
     }
@@ -276,11 +557,11 @@
       } finally {
         sendButton.disabled = false;
         messageBox.focus();
-        refreshBalances();
+        loadBooks();
       }
     });
 
-    refreshBalances();
+    loadBooks();
   </script>
 </body>
 </html>

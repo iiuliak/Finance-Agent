@@ -58,6 +58,7 @@ class AccountCreate(Schema):
     user_id: UUID
     operating_balance: NonNegativeMoney = Decimal("0.00")
     reserve_balance: NonNegativeMoney = Decimal("0.00")
+    as_of_date: date
 
 
 class AccountRead(AccountCreate):
@@ -193,6 +194,20 @@ class TransferRead(TransferCommand):
 
 
 # --------------------------- Agent inputs ---------------------------
+class BooksRead(Schema):
+    """The ledger as stored, plus the figures the chosen day produces."""
+
+    as_of: date
+    operating_balance: NonNegativeMoney
+    reserve_balance: NonNegativeMoney
+    vat_due: NonNegativeMoney
+    expected_additional_vat: NonNegativeMoney
+    forecast_vat: NonNegativeMoney
+    proposed_amount: NonNegativeMoney
+    invoices: list[InvoiceRead]
+    expenses: list[ExpenseRead]
+
+
 class FinancialSnapshot(Schema):
     """Optional validated value passed between LangGraph nodes."""
     account: AccountRead

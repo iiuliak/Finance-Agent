@@ -3,6 +3,9 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID
 
+# The day the seeded books open on. The page can move the account off this day afterwards.
+DEMO_AS_OF = date(2026, 11, 15)
+
 DEMO_USER_ID = UUID("00000000-0000-4000-8000-000000000001")
 DEMO_ACCOUNT_ID = UUID("00000000-0000-4000-8000-000000000002")
 DEMO_USER_NAME = "Demo Freelancer"
@@ -17,9 +20,8 @@ class DemoInvoice:
     id: UUID
     net_amount: Decimal
     issue_date: date
-    payment_date: date | None  # known on 15 Nov 2026; this is what the database stores
+    payment_date: date | None  # the real payment date; a later day is hidden until as_of reaches it
     expected_payment_date: date | None
-    true_payment_date: date  # used only by the forecast evaluation
 
 
 @dataclass(frozen=True)
@@ -37,7 +39,6 @@ INVOICES = (
         issue_date=date(2026, 10, 1),
         payment_date=date(2026, 10, 5),
         expected_payment_date=date(2026, 10, 5),
-        true_payment_date=date(2026, 10, 5),
     ),
     DemoInvoice(
         id=UUID("00000000-0000-4000-8000-000000000102"),
@@ -45,23 +46,20 @@ INVOICES = (
         issue_date=date(2026, 10, 20),
         payment_date=date(2026, 11, 2),
         expected_payment_date=date(2026, 11, 2),
-        true_payment_date=date(2026, 11, 2),
     ),
     DemoInvoice(
         id=UUID("00000000-0000-4000-8000-000000000103"),
         net_amount=Decimal("8000.00"),
         issue_date=date(2026, 11, 1),
-        payment_date=None,
+        payment_date=date(2027, 1, 5),
         expected_payment_date=date(2026, 11, 30),
-        true_payment_date=date(2027, 1, 5),
     ),
     DemoInvoice(
         id=UUID("00000000-0000-4000-8000-000000000104"),
         net_amount=Decimal("2000.00"),
         issue_date=date(2026, 11, 10),
-        payment_date=None,
+        payment_date=date(2026, 12, 10),
         expected_payment_date=date(2027, 1, 15),
-        true_payment_date=date(2026, 12, 10),
     ),
 )
 

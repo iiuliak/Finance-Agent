@@ -21,8 +21,8 @@ def test_seed_forecast_on_15_november() -> None:
 
 
 def test_payments_after_as_of_are_not_known_yet() -> None:
-    """Fed the true payment dates, the forecast still only sees what was known on 15 Nov."""
-    invoices = demo_invoices(use_true_payment_dates=True)
+    """The stored payment dates include December and January. 15 November does not see them."""
+    invoices = demo_invoices()
 
     so_far = vat_so_far(Q4, AS_OF, invoices, demo_expenses())
     result = forecast_vat(Q4, AS_OF, invoices, demo_expenses())
@@ -75,13 +75,45 @@ def test_paid_invoice_is_not_counted_twice() -> None:
     assert result.estimated_vat_due == Decimal("1900.00")
 
 
-def test_overdue_open_invoice_still_counts() -> None:
+def test_overdue_open_invoice_is_left_out() -> None:
     overdue = make_invoice("1000.00", date(2026, 10, 1), expected=date(2026, 11, 1))
 
     result = forecast_vat(Q4, AS_OF, [overdue], [])
 
+    assert result.expected_additional_vat == Decimal("0.00")
+    assert result.estimated_vat_due == Decimal("0.00")
+
+
+def test_expected_payment_on_the_chosen_day_still_counts() -> None:
+    due_today = make_invoice("1000.00", date(2026, 10, 1), expected=AS_OF)
+
+    result = forecast_vat(Q4, AS_OF, [due_today], [])
+
     assert result.expected_additional_vat == Decimal("190.00")
-    assert result.estimated_vat_due == Decimal("190.00")
+
+
+def test_fifth_of_november_matches_the_opening_day() -> None:
+    day = date(2026, 11, 5)
+    period = quarter_containing(day)
+
+    so_far = vat_so_far(period, day, demo_invoices(), demo_expenses())
+    result = forecast_vat(period, day, demo_invoices(), demo_expenses())
+
+    assert so_far.vat_due == Decimal("2565.00")
+    assert result.expected_additional_vat == Decimal("1520.00")
+    assert result.estimated_vat_due == Decimal("4085.00")
+
+
+def test_tenth_of_december_counts_the_paid_invoice_and_drops_the_missed_one() -> None:
+    day = date(2026, 12, 10)
+    period = quarter_containing(day)
+
+    so_far = vat_so_far(period, day, demo_invoices(), demo_expenses())
+    result = forecast_vat(period, day, demo_invoices(), demo_expenses())
+
+    assert so_far.vat_due == Decimal("2945.00")
+    assert result.expected_additional_vat == Decimal("0.00")
+    assert result.estimated_vat_due == Decimal("2945.00")
 
 
 def test_estimate_uses_net_vat_before_flooring() -> None:

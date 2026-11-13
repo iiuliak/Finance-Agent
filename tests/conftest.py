@@ -8,6 +8,7 @@ TEST_DATABASE_URL = os.environ.get(
 os.environ["DATABASE_URL"] = TEST_DATABASE_URL
 # Tests never call a real model, even when the shell has a .env with LLM_MODE=openai loaded.
 os.environ["LLM_MODE"] = "template"
+os.environ["AS_OF_DATE"] = "2026-11-15"
 
 from collections.abc import Iterator  # noqa: E402
 

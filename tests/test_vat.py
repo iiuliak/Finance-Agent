@@ -28,13 +28,14 @@ def test_quarter_containing(as_of: date, start: date, end: date) -> None:
     assert period.period_end == end
 
 
-def test_seed_vat_already_due() -> None:
+def test_seed_vat_at_quarter_end() -> None:
+    """calculate_vat sees every real payment. The 15 November view is vat_so_far."""
     result = calculate_vat(Q4, demo_invoices(), demo_expenses())
 
-    assert result.collected_vat == Decimal("2850.00")
+    assert result.collected_vat == Decimal("3230.00")
     assert result.input_vat == Decimal("285.00")
-    assert result.net_vat == Decimal("2565.00")
-    assert result.vat_due == Decimal("2565.00")
+    assert result.net_vat == Decimal("2945.00")
+    assert result.vat_due == Decimal("2945.00")
 
 
 def test_payment_on_period_end_is_excluded() -> None:
