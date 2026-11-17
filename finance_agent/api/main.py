@@ -228,14 +228,14 @@ def chat(body: ChatRequest, session: Session = Depends(get_session)) -> ChatResp
         if error.response.status_code == 429:
             raise HTTPException(
                 status_code=503,
-                detail="The language model's free-tier rate limit was hit. Try again in a minute.",
+                detail="The assistant is busy. Try again in a minute.",
             ) from None
         raise HTTPException(
-            status_code=502, detail=f"The language model returned an error: {error}"
+            status_code=502, detail="I couldn't answer just now. Try again."
         ) from None
-    except httpx.HTTPError as error:
+    except httpx.HTTPError:
         raise HTTPException(
-            status_code=502, detail=f"The language model could not be reached: {error}"
+            status_code=502, detail="I couldn't answer just now. Try again."
         ) from None
     # Commit before responding, so the card's proposal exists when the user clicks Approve.
     session.commit()
