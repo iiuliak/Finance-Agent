@@ -2,7 +2,7 @@
 
 An agent that tells a freelancer how much of their balance is VAT and proposes moving it into a tax reserve. It never moves money without the user's confirmation.
 
-The demo books are synthetic: one account, four invoices, two expenses, quarterly VAT on a cash basis (VAT is due when an invoice is paid). They open on 15 November 2026. The page can move that day, and it can add or delete invoices and expenses or change the two balances. A payment dated after the chosen day is hidden from the agent until the day reaches it. [RULES.md](RULES.md) is the full contract, including the answer key every test reproduces.
+The demo books are synthetic: one account, a year of invoices and expenses, quarterly VAT on a cash basis (VAT is due when an invoice is paid). They open on today, unless `AS_OF_DATE` sets another day. Each quarter has its own invoices, on fixed days, so the card follows whichever quarter that day is in. The page can move that day, and it can add or delete invoices and expenses or change the two balances. A payment dated after the chosen day is hidden from the agent until the day reaches it. [RULES.md](RULES.md) is the full contract, including the answer key every test reproduces.
 
 ## Run it with Docker
 
@@ -12,9 +12,9 @@ You need Docker Desktop (or any Docker with Compose v2).
 docker compose up --build
 ```
 
-Open <http://localhost:8000>. The books open on 15 November 2026. Ask "How much should I move to my VAT reserve?". A card shows VAT already due (€2,565), the estimated VAT at quarter end (€4,085) and the proposed transfer (€3,585). Approve moves the money; Reject leaves everything as it is.
+Open <http://localhost:8000>. The books open on today. From 2 November through 29 November, ask "How much should I move to my VAT reserve?". A card shows VAT already due (€2,565), the estimated VAT at quarter end (€4,085) and the proposed transfer (€3,585). The invoices from the rest of the year are on the books, and they belong to other quarters, so they leave that card as it is. Approve moves the money; Reject leaves everything as it is.
 
-The same panel can move the day. On 10 December the €2,000 invoice has been paid, VAT already due is €2,945, and the missed €8,000 invoice drops out of the forecast. On 5 November the card matches 15 November. Adding an invoice or an expense, or editing either balance, updates those figures. A card that was already on screen is withdrawn, because its amount was computed from the old books.
+The same panel can move the day. On 10 December the €2,000 invoice has been paid, VAT already due is €2,945, and the missed €8,000 invoice drops out of the forecast. On 5 November the card matches 15 November. Moving into another quarter reads that quarter's invoices instead. Adding an invoice or an expense, or editing either balance, updates those figures. A card that was already on screen is withdrawn, because its amount was computed from the old books.
 
 On startup the container applies the migrations and loads the demo books if they are missing. To start the demo over after approving:
 
@@ -67,20 +67,19 @@ The model never does arithmetic and never chooses an amount. It can call five to
 
 ## How we show it works
 
-Forecast error against the true VAT in the synthetic data. This check always stands on 15 November, whichever day the page is using:
+Forecast error against the true VAT in the synthetic data. This check scores the opening day (today, or `AS_OF_DATE`). It does not follow the day selected on the page:
 
 ```bash
 python -m finance_agent.eval_forecast
 ```
 
 ```text
-as_of 2026-11-15
 estimated_vat_due 4085.00
 true_vat_due 2945.00
 absolute_error 1140.00
 ```
 
-The forecast assumes each open invoice is paid on its expected date. In the true data, the €8,000 invoice slips into January and the €2,000 invoice is paid early, in December, which accounts for the error.
+That sample is what a day from 2 November through 29 November prints. Another day prints that day's error. The forecast assumes each open invoice is paid on its expected date. In the fourth quarter the €8,000 invoice is paid in January and the €2,000 invoice is paid on 10 December, which accounts for the error.
 
 Tests, including the proof that no transfer runs without approval (`tests/test_approval.py`, `tests/test_api.py`, `tests/test_agent.py`), need the database from `docker compose up -d db`. They create and use a separate `vat_test` database:
 

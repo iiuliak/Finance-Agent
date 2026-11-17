@@ -13,6 +13,7 @@ from sqlalchemy import (
     Text,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -43,7 +44,9 @@ class Account(Base):
     user_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("users.id"), index=True)
     operating_balance: Mapped[Decimal] = mapped_column(MONEY, server_default="0.00")
     reserve_balance: Mapped[Decimal] = mapped_column(MONEY, server_default="0.00")
-    as_of_date: Mapped[date] = mapped_column(Date, default=date(2026, 11, 15), server_default="2026-11-15")
+    as_of_date: Mapped[date] = mapped_column(
+        Date, default=date.today, server_default=text("CURRENT_DATE")
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

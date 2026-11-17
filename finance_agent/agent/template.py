@@ -1,9 +1,11 @@
 import re
+from collections.abc import Sequence
 from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from finance_agent.agent.intent import wants_transfer
 from finance_agent.domain.forecast import forecast_vat, known_as_of, vat_so_far
 from finance_agent.domain.money import format_euros
 from finance_agent.domain.periods import format_day, quarter_containing
@@ -12,9 +14,14 @@ from finance_agent.repositories.ledger import get_snapshot
 from finance_agent.services.proposals import draft_proposal, generate_proposal
 
 
-def answer(session: Session, account_id: UUID, message: str) -> tuple[str, VATProposalRead | None]:
+def answer(
+    session: Session,
+    account_id: UUID,
+    message: str,
+    history: Sequence[tuple[str, str]] = (),
+) -> tuple[str, VATProposalRead | None]:
     """Answer from the books. A proposal is prepared only when the message asks for one."""
-    if _asks(message, "move", "transfer", "aside", "proposal"):
+    if wants_transfer(message, history):
         draft = draft_proposal(session, account_id)
         if draft.proposed_amount == 0:
             return draft.explanation, None
@@ -36,9 +43,9 @@ def answer(session: Session, account_id: UUID, message: str) -> tuple[str, VATPr
             f"The reserve holds {format_euros(account.reserve_balance)}."
         )
     if _asks(message, "invoice", "invoices", "unpaid", "paid"):
-        parts.append(_invoices(invoices))
+        parts.append(invoice_lines(invoices))
     if _asks(message, "expense", "expenses", "spent", "spend"):
-        parts.append(_expenses(expenses))
+        parts.append(expense_lines(expenses))
     if _asks(message, "forecast", "quarter", "estimate"):
         parts.append(
             f"Estimated VAT at quarter end is {format_euros(forecast.estimated_vat_due)}. "
@@ -80,28 +87,29 @@ def _asks(message: str, *words: str) -> bool:
     return any(re.search(rf"\b{re.escape(word)}\b", text) for word in words)
 
 
-def _invoices(invoices) -> str:
+def invoice_lines(invoices) -> str:
+    """One sentence the reply can repeat. Dates are written out so a year is hard to mistype."""
     lines = []
     for invoice in invoices:
         if invoice.payment_date is None:
             expected = (
-                f", expected {invoice.expected_payment_date.isoformat()}"
+                f", expected {format_day(invoice.expected_payment_date)}"
                 if invoice.expected_payment_date is not None
                 else ""
             )
             state = f"unpaid{expected}"
         else:
-            state = f"paid on {invoice.payment_date.isoformat()}"
+            state = f"paid on {format_day(invoice.payment_date)}"
         lines.append(
             f"{format_euros(invoice.net_amount)} net, VAT {format_euros(invoice.vat_amount)}, "
-            f"issued {invoice.issue_date.isoformat()}, {state}"
+            f"issued {format_day(invoice.issue_date)}, {state}"
         )
     return "Invoices: " + "; ".join(lines) + "."
 
 
-def _expenses(expenses) -> str:
+def expense_lines(expenses) -> str:
     lines = [
-        f"{expense.expense_date.isoformat()}: {format_euros(expense.gross_amount)} gross, "
+        f"{format_day(expense.expense_date)}: {format_euros(expense.gross_amount)} gross, "
         f"input VAT {format_euros(expense.input_vat_amount)}"
         for expense in expenses
     ]

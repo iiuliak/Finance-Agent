@@ -22,7 +22,7 @@ services:
         condition: service_healthy
     environment:
       DATABASE_URL: postgresql+psycopg://vat:vat@db:5432/vat
-      AS_OF_DATE: ${AS_OF_DATE:-2026-11-15}
+      AS_OF_DATE: ${AS_OF_DATE:-}
       LLM_MODE: ${LLM_MODE:-template}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

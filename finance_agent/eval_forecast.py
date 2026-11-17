@@ -3,12 +3,12 @@ from datetime import date
 from decimal import Decimal
 
 from finance_agent import demo_data
-from finance_agent.demo_data import DEMO_AS_OF
 from finance_agent.domain.forecast import forecast_vat
 from finance_agent.domain.money import money
 from finance_agent.domain.periods import quarter_containing
 from finance_agent.domain.vat import calculate_vat
 from finance_agent.models import ExpenseRead, InvoiceRead
+from finance_agent.settings import get_settings
 
 
 @dataclass(frozen=True)
@@ -22,9 +22,10 @@ class ForecastError:
 def evaluate(as_of: date | None = None) -> ForecastError:
     """Score the forecast against the quarter-end VAT from the real payment dates.
 
-    The published proof always stands on 15 November, whichever day the page is using.
+    With no date, this scores the opening day: today, or AS_OF_DATE when that is set.
+    The page can stand on another day; this check does not read it.
     """
-    as_of = DEMO_AS_OF if as_of is None else as_of
+    as_of = get_settings().as_of_date if as_of is None else as_of
     invoices = [
         InvoiceRead(
             id=invoice.id,
@@ -36,7 +37,7 @@ def evaluate(as_of: date | None = None) -> ForecastError:
             payment_date=invoice.payment_date,
             expected_payment_date=invoice.expected_payment_date,
         )
-        for invoice in demo_data.INVOICES
+        for invoice in demo_data.invoices_for(as_of)
     ]
     expenses = [
         ExpenseRead(
@@ -46,7 +47,7 @@ def evaluate(as_of: date | None = None) -> ForecastError:
             gross_amount=expense.gross_amount,
             input_vat_amount=expense.input_vat_amount,
         )
-        for expense in demo_data.EXPENSES
+        for expense in demo_data.expenses_for(as_of)
     ]
     period = quarter_containing(as_of)
     estimated = forecast_vat(period, as_of, invoices, expenses).estimated_vat_due

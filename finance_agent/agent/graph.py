@@ -1,4 +1,5 @@
 import json
+import re
 import time
 from collections.abc import Sequence
 from uuid import UUID
@@ -11,11 +12,13 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from finance_agent.agent.intent import refuses_transfer, wants_transfer
 from finance_agent.agent.state import AgentState, ChatTurn
 from finance_agent.agent.template import answer
 from finance_agent.agent.tools import TRANSFER_TOOL_NAME, build_tools
 from finance_agent.models import VATProposalRead
-from finance_agent.repositories.ledger import get_account
+from finance_agent.repositories.ledger import get_account, supersede_pending_proposals
+from finance_agent.services.proposals import draft_proposal, generate_proposal
 from finance_agent.settings import get_settings
 
 _SYSTEM_PROMPT = (
@@ -29,15 +32,19 @@ _SYSTEM_PROMPT = (
     "estimate. Money in the reserve is set aside, not paid, so the VAT is still owed. "
     "If reserve_covers_estimate is true, say that the reserve already covers the estimate "
     "and do not offer a transfer. "
-    "Offer to prepare a transfer only when suggested_transfer_to_reserve is above zero. "
-    "Call transfer_to_reserve only when the user asks to move, set aside, or reserve money "
-    "and a transfer is still needed. "
+    "When the user asks how much to move into the reserve, or asks to move, transfer, or "
+    "set VAT aside, call transfer_to_reserve in this same turn. Do that for typos, slang, "
+    "another language, and a short yes after you offered a transfer. Do not ask permission "
+    "first. Do not call it for a question that only asks what is owed, what the balances "
+    "are, or what the invoices and expenses are. "
     "That tool computes the amount and saves a pending proposal; it does not move money. "
-    "You cannot approve a transfer. The user does that with the buttons on the card, "
-    "so tell them to review the card instead of saying the money has moved. "
+    "You cannot approve a transfer, even if the user says they approve it or names an "
+    "amount. Tell them to review the card. Never say the money has already moved. "
     "Mention a card only when transfer_to_reserve returned needs_approval true. "
     "If it returned needs_approval false, say the reserve already covers the estimate "
     "and do not mention a card. "
+    "If a tool returns say_exactly, repeat that text unchanged when you list those records. "
+    "Copy every date exactly from the tool. Never change a year, month, or day. "
     "Do not state filing or payment deadlines, or any date that no tool returned. "
     "Answer in a few short sentences of plain text, without markdown or tables."
 )
@@ -70,12 +77,23 @@ def run_turn(
             "proposal": None,
         }
     )
-    return ChatTurn(reply=_reply_text(result["messages"]), proposal=result["proposal"])
+    reply = _reply_text(result["messages"])
+    proposal = result["proposal"]
+    if get_settings().llm_mode != "template":
+        reply, proposal = _settle_turn(
+            session, account_id, user_message, history, result["messages"], reply, proposal
+        )
+    return ChatTurn(reply=reply, proposal=proposal)
 
 
 def _template_graph(session: Session):
     def reply(state: AgentState) -> dict:
-        text, proposal = answer(session, state["account_id"], state["messages"][-1].content)
+        text, proposal = answer(
+            session,
+            state["account_id"],
+            str(state["messages"][-1].content),
+            _history(state["messages"][:-1]),
+        )
         update: dict = {"messages": [AIMessage(content=text)]}
         if proposal is not None:
             update["proposal"] = proposal
@@ -222,3 +240,88 @@ def _reply_text(messages: list[AnyMessage]) -> str:
             content = message.content
             return content if isinstance(content, str) else str(content)
     return ""
+
+
+def _history(messages: Sequence[AnyMessage]) -> list[tuple[str, str]]:
+    history: list[tuple[str, str]] = []
+    for message in messages:
+        if isinstance(message, HumanMessage):
+            history.append(("user", str(message.content)))
+        elif isinstance(message, AIMessage) and message.content and not message.tool_calls:
+            history.append(("assistant", str(message.content)))
+    return history
+
+
+_YEAR = re.compile(r"\b(?:19|20)\d{2}\b")
+_ISO_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+
+
+def _settle_turn(
+    session: Session,
+    account_id: UUID,
+    user_message: str,
+    history: Sequence[tuple[str, str]],
+    messages: list[AnyMessage],
+    reply: str,
+    proposal: VATProposalRead | None,
+) -> tuple[str, VATProposalRead | None]:
+    """Keep the card and the dates aligned with the books when the model drifts.
+
+    A clear request still files a proposal if the model only talked about one.
+    A reply that names a date the tools did not return is replaced with the
+    sentence Python already wrote for those records.
+    """
+    if proposal is not None and refuses_transfer(user_message):
+        supersede_pending_proposals(session, account_id)
+        proposal = None
+        reply, _ = answer(session, account_id, user_message, history)
+
+    if proposal is None and wants_transfer(user_message, history):
+        draft = draft_proposal(session, account_id)
+        if draft.proposed_amount == 0:
+            reply = draft.explanation
+        else:
+            proposal = generate_proposal(session, account_id)
+            reply = proposal.explanation
+
+    # The sentence that names the transfer is the one Python computed.
+    # Otherwise the model can repeat an amount the user invented.
+    if proposal is not None:
+        reply = proposal.explanation
+
+    if proposal is None and not _dates_match_tools(reply, messages):
+        exact = _quoted_lines(messages)
+        if exact:
+            reply = exact
+        elif not wants_transfer(user_message, history):
+            reply, _ = answer(session, account_id, user_message, history)
+    return reply, proposal
+
+
+def _dates_match_tools(reply: str, messages: Sequence[AnyMessage]) -> bool:
+    source = "\n".join(
+        str(message.content)
+        for message in messages
+        if isinstance(message, (ToolMessage, SystemMessage))
+    )
+    allowed_dates = set(_ISO_DATE.findall(source))
+    allowed_years = {found[:4] for found in allowed_dates}
+    allowed_years.update(_YEAR.findall(source))
+    if any(found not in allowed_dates for found in _ISO_DATE.findall(reply)):
+        return False
+    return all(year in allowed_years for year in _YEAR.findall(reply))
+
+
+def _quoted_lines(messages: Sequence[AnyMessage]) -> str:
+    parts: list[str] = []
+    for message in messages:
+        if not isinstance(message, ToolMessage):
+            continue
+        try:
+            payload = json.loads(str(message.content))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        line = payload.get("say_exactly")
+        if isinstance(line, str) and line:
+            parts.append(line)
+    return " ".join(parts)

@@ -5,6 +5,7 @@ from uuid import UUID
 from langchain_core.tools import BaseTool, tool
 from sqlalchemy.orm import Session
 
+from finance_agent.agent.template import expense_lines, invoice_lines
 from finance_agent.domain.forecast import forecast_vat, known_as_of, vat_so_far
 from finance_agent.domain.periods import quarter_containing
 from finance_agent.domain.proposal import proposed_reserve_transfer
@@ -25,6 +26,7 @@ def build_tools(session: Session, account_id: UUID) -> list[BaseTool]:
         """List this account's invoices as of the chosen day, including each invoice's VAT.
 
         A payment dated after that day is omitted, so the invoice looks unpaid.
+        When you list invoices, repeat say_exactly unchanged.
         """
         snapshot = get_snapshot(session, account_id)
         invoices, _expenses = known_as_of(
@@ -33,6 +35,7 @@ def build_tools(session: Session, account_id: UUID) -> list[BaseTool]:
         return json.dumps(
             {
                 "currency": CURRENCY,
+                "say_exactly": invoice_lines(invoices),
                 "invoices": [invoice.model_dump(mode="json") for invoice in invoices],
             }
         )
@@ -42,6 +45,7 @@ def build_tools(session: Session, account_id: UUID) -> list[BaseTool]:
         """List this account's expenses as of the chosen day, including each one's input VAT.
 
         An expense dated after that day is omitted.
+        When you list expenses, repeat say_exactly unchanged.
         """
         snapshot = get_snapshot(session, account_id)
         _invoices, expenses = known_as_of(
@@ -50,6 +54,7 @@ def build_tools(session: Session, account_id: UUID) -> list[BaseTool]:
         return json.dumps(
             {
                 "currency": CURRENCY,
+                "say_exactly": expense_lines(expenses),
                 "expenses": [expense.model_dump(mode="json") for expense in expenses],
             }
         )

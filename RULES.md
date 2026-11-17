@@ -4,7 +4,7 @@ These rules are the contract for the demo. The calculation, the forecast, the ca
 
 ## Clock
 
-The books open on **15 November 2026**. `AS_OF_DATE` sets that starting day when the demo account is seeded. After that, the day lives on the account, and the page can move it. The app does not use the wall clock.
+The books open on **today**, unless `AS_OF_DATE` sets another day. That day is stored on the account when the demo is seeded. After that, the day lives on the account, and the page can move it. Moving the day leaves the invoices where they are. It only changes which payments and expenses count as already happened.
 
 The chosen day selects the quarter. 15 November 2026 falls in the fourth calendar quarter:
 
@@ -80,6 +80,28 @@ A transfer is inserted only by the approve decision:
 
 The model writes the explanation only. It does not choose any amount.
 
+## Where the dates come from
+
+The books are one calendar year: the year of the opening day. The opening day is today, unless `AS_OF_DATE` sets another day. The dates are fixed in that year. They do not slide when the day changes. Moving the day only changes which of those payments have happened.
+
+Each quarter has four invoices and two expenses, at the same offsets from the quarter start:
+
+- One invoice is issued on day 1 and paid on day 4.
+- One is issued on day 19 and paid on day 32.
+- One is expected on day 60 and actually paid 4 days after the quarter ends.
+- One is expected 14 days after the quarter ends and actually paid on day 70.
+- The expenses fall on day 9 (€190 of input VAT) and day 31 (€95).
+
+The amounts differ by quarter, so a payment lands in every month. The fourth quarter uses the amounts in the table below. Tests set `AS_OF_DATE` to 15 November 2026, which reads that quarter. The other quarters are:
+
+| Quarter | Nets |
+| --- | --- |
+| January–March | €6,000, €3,000, €4,000, €1,000 |
+| April–June | €7,000, €9,000, €11,000, €1,500 |
+| July–September | €12,000, €2,500, €6,500, €8,500 |
+
+The €6,500 invoice is the one exception to the payment offset. It was expected on 30 August and is paid on 20 January, so it is not part of the October–December bill.
+
 ## Seed answer key
 
 One account:
@@ -105,7 +127,7 @@ Expenses:
 | 10 Oct 2026 | €1,190 | €190 |
 | 1 Nov 2026 | €595 | €95 |
 
-Figures every test should reproduce:
+Figures for 15 November 2026. They also hold on any day from 2 November through 29 November, because nothing is paid or expected in between. Invoices from the other quarters are outside this quarter, so they leave the card unchanged:
 
 | Figure | Amount |
 | --- | --- |
@@ -118,7 +140,7 @@ Figures every test should reproduce:
 | True quarter-end VAT | €2,945 |
 | Absolute forecast error | €1,140 |
 
-The forecast check always scores 15 November, even when the page is standing on another day.
+The forecast check scores the opening day: today, or `AS_OF_DATE` when that is set. It does not read the day the page is standing on.
 
 On 10 December the €2,000 invoice has been paid and the €8,000 invoice's expected day has passed:
 

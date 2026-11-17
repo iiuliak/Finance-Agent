@@ -8,7 +8,9 @@ class Settings:
             "DATABASE_URL",
             "postgresql+psycopg://vat:vat@localhost:5433/vat",
         )
-        self.as_of_date = date.fromisoformat(os.environ.get("AS_OF_DATE", "2026-11-15"))
+        # Unset means today, so a fresh demo opens on the day it is seeded.
+        raw_as_of = os.environ.get("AS_OF_DATE", "").strip()
+        self.as_of_date = date.fromisoformat(raw_as_of) if raw_as_of else date.today()
         self.llm_mode = os.environ.get("LLM_MODE", "template")
         self.openai_base_url = os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
         self.openai_api_key = os.environ.get("OPENAI_API_KEY", "")

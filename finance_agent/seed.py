@@ -15,6 +15,7 @@ def seed(session: Session) -> UUID:
     if session.get(Account, demo_data.DEMO_ACCOUNT_ID) is not None:
         return demo_data.DEMO_ACCOUNT_ID
 
+    as_of = get_settings().as_of_date
     session.add(User(id=demo_data.DEMO_USER_ID, name=demo_data.DEMO_USER_NAME))
     session.flush()
     session.add(
@@ -23,7 +24,7 @@ def seed(session: Session) -> UUID:
             user_id=demo_data.DEMO_USER_ID,
             operating_balance=demo_data.OPERATING_BALANCE,
             reserve_balance=demo_data.RESERVE_BALANCE,
-            as_of_date=get_settings().as_of_date,
+            as_of_date=as_of,
         )
     )
     session.flush()
@@ -37,7 +38,7 @@ def seed(session: Session) -> UUID:
             payment_date=invoice.payment_date,
             expected_payment_date=invoice.expected_payment_date,
         )
-        for invoice in demo_data.INVOICES
+        for invoice in demo_data.invoices_for(as_of)
     )
     session.add_all(
         Expense(
@@ -47,7 +48,7 @@ def seed(session: Session) -> UUID:
             gross_amount=expense.gross_amount,
             input_vat_amount=expense.input_vat_amount,
         )
-        for expense in demo_data.EXPENSES
+        for expense in demo_data.expenses_for(as_of)
     )
     session.flush()
     return demo_data.DEMO_ACCOUNT_ID

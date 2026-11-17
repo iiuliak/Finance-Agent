@@ -31,13 +31,18 @@ def test_seed_matches_the_answer_key(db_session: Session) -> None:
     )
 
     assert snapshot.account.as_of_date == date(2026, 11, 15)
-    assert [invoice.payment_date for invoice in snapshot.invoices] == [
+    assert len(snapshot.invoices) == 16
+    assert len(snapshot.expenses) == 8
+    fourth_quarter = [
+        invoice for invoice in snapshot.invoices if invoice.issue_date >= date(2026, 10, 1)
+    ]
+    assert [invoice.payment_date for invoice in fourth_quarter] == [
         date(2026, 10, 5),
         date(2026, 11, 2),
         date(2027, 1, 5),
         date(2026, 12, 10),
     ]
-    assert [invoice.vat_amount for invoice in snapshot.invoices] == [
+    assert [invoice.vat_amount for invoice in fourth_quarter] == [
         Decimal("1900.00"),
         Decimal("950.00"),
         Decimal("1520.00"),
@@ -60,7 +65,7 @@ def test_reset_restores_the_starting_balances(db_session: Session) -> None:
     assert account.reserve_balance == demo_data.RESERVE_BALANCE
     assert db_session.scalar(select(func.count()).select_from(Proposal)) == 0
     assert db_session.scalar(select(func.count()).select_from(Transfer)) == 0
-    assert db_session.scalar(select(func.count()).select_from(Invoice)) == 4
+    assert db_session.scalar(select(func.count()).select_from(Invoice)) == 16
 
 
 def test_seed_twice_inserts_once(db_session: Session) -> None:
@@ -69,4 +74,4 @@ def test_seed_twice_inserts_once(db_session: Session) -> None:
 
     assert first == second
     assert db_session.scalar(select(func.count()).select_from(User)) == 1
-    assert db_session.scalar(select(func.count()).select_from(Invoice)) == 4
+    assert db_session.scalar(select(func.count()).select_from(Invoice)) == 16

@@ -40,7 +40,12 @@ def test_opening_day_and_real_payment_dates_are_on_the_books(
     assert Decimal(body["expected_additional_vat"]) == Decimal("1520.00")
     assert Decimal(body["forecast_vat"]) == Decimal("4085.00")
     assert Decimal(body["proposed_amount"]) == Decimal("3585.00")
-    assert [invoice["payment_date"] for invoice in body["invoices"]] == [
+    fourth_quarter = [
+        invoice for invoice in body["invoices"] if invoice["issue_date"] >= "2026-10-01"
+    ]
+    assert len(body["invoices"]) == 16
+    assert len(body["expenses"]) == 8
+    assert [invoice["payment_date"] for invoice in fourth_quarter] == [
         "2026-10-05",
         "2026-11-02",
         "2027-01-05",
@@ -128,7 +133,11 @@ def test_adding_and_deleting_an_invoice_changes_the_forecast(
         },
     )
     body = added.json()
-    created = next(invoice for invoice in body["invoices"] if invoice["net_amount"] == "1000.00")
+    created = next(
+        invoice
+        for invoice in body["invoices"]
+        if invoice["expected_payment_date"] == "2026-11-20"
+    )
 
     assert added.status_code == 200
     assert Decimal(created["vat_amount"]) == Decimal("190.00")
