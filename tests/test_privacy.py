@@ -22,6 +22,7 @@ _CLEAN = [
     "€2,565.00. Shall I set it aside?",
     "2026-11-15",
     "May I move the VAT?",
+    "What is an IBAN?",
     "I am owed VAT",
     "ich bin sicher",
 ]
@@ -44,6 +45,7 @@ def test_ordinary_bookkeeping_messages_are_not_personal(message: str) -> None:
         "ich bin Anna",
         "ada@example.com",
         "ada @ example.com",
+        "IBAN 676767676767",
         "IBAN DE89 3704 0044 0532 0130 00",
         "DE89370400440532013000",
         "+49 151 23456789",

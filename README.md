@@ -65,7 +65,7 @@ The model never does arithmetic and never chooses an amount. It can call five to
 
 `transfer_to_reserve` only saves a pending proposal whose amount Python computed. Money moves only when the user clicks Approve, which calls `POST /api/proposals/{id}/decision`, an endpoint the model has no access to.
 
-A user message that contains personal information, such as a name, a surname, an IBAN, an email, or a phone number, is not sent. The model receives the flag `personal_information` instead and asks the user to rewrite the message. Earlier chat turns that contain personal information are replaced with the same flag. A message without that information is sent as written.
+A user message that contains personal information, such as a name, a surname, an IBAN, an email, or a phone number, is not sent, and the model is not called. The reply is always: "Your message contains personal information (e.g., a name, surname, IBAN, email, or phone number). Please remove it from your message." Earlier chat turns that contain personal information are replaced with a flag. A message without that information is sent as written.
 
 ## How we show it works
 

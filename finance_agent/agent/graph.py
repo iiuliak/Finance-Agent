@@ -13,9 +13,13 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from finance_agent.agent.intent import refuses_transfer, wants_transfer
-from finance_agent.agent.privacy import PERSONAL_INFORMATION, contains_personal_information
+from finance_agent.agent.privacy import (
+    PERSONAL_INFORMATION,
+    PERSONAL_INFORMATION_REPLY,
+    contains_personal_information,
+)
 from finance_agent.agent.state import AgentState, ChatTurn
-from finance_agent.agent.template import answer
+from finance_agent.agent.template import answer, reports_books
 from finance_agent.agent.tools import TRANSFER_TOOL_NAME, build_tools
 from finance_agent.models import VATProposalRead
 from finance_agent.repositories.ledger import get_account, supersede_pending_proposals
@@ -44,30 +48,15 @@ _SYSTEM_PROMPT = (
     "Mention a card only when transfer_to_reserve returned needs_approval true. "
     "If it returned needs_approval false, say the reserve already covers the estimate "
     "and do not mention a card. "
-    "If a tool returns say_exactly, repeat that text unchanged when you list those records. "
+    "If a tool returns say_exactly, repeat that text unchanged, including its line breaks. "
+    "The user may name a quarter, a month, a year, a day, or two dates. The tools already "
+    "apply that window. Do not add records from outside it. "
+    "When say_exactly explains VAT, that text is the balance and the calculation. Repeat it. "
     "Copy every date exactly from the tool. Never change a year, month, or day. "
     "Do not state filing or payment deadlines, or any date that no tool returned. "
-    "Answer in a few short sentences of plain text, without markdown or tables. "
-    "If a user message is exactly personal_information, the text was withheld because it "
-    "contains personal information. Tell them their message contains personal information, "
-    "such as a name, a surname, an IBAN, an email, or a phone number, and ask them to "
-    "rewrite it without that. Do not guess the withheld text and do not call tools for "
-    "that message."
-)
-
-_WITHHELD_PROMPT = (
-    "The latest user message is the flag personal_information. "
-    "The text was withheld because it contains personal information. "
-    "Tell the user their message contains personal information, such as a name, a surname, "
-    "an IBAN, an email, or a phone number, and ask them to rewrite it without that. "
-    "You do not know what was withheld. Do not guess it. "
-    "Answer in a few short sentences of plain text."
-)
-_REWRITE = re.compile(r"rewrit|rephras|reformulat|without that|without it", re.IGNORECASE)
-_MENTIONS_PERSONAL = re.compile(r"personal information", re.IGNORECASE)
-_REWRITE_FALLBACK = (
-    "Your message contains personal information, such as a name, a surname, an IBAN, "
-    "an email, or a phone number. Please rewrite it without that."
+    "Keep each record on its own line. Do not join the list into one paragraph. "
+    "A previous user message may be exactly personal_information. That text was withheld. "
+    "Do not guess it, and answer only the latest message."
 )
 
 _ATTEMPTS = 3
@@ -85,10 +74,10 @@ def run_turn(
 
     history holds earlier (role, text) pairs, role "user" or "assistant", oldest first.
     It only gives the model context; figures still come from the tools.
-    A message with personal information is replaced by a flag before the model sees it.
+    A message with personal information is not sent. The reply is a fixed sentence.
     """
     if get_settings().llm_mode != "template" and contains_personal_information(user_message):
-        return _personal_information_turn(history)
+        return ChatTurn(reply=PERSONAL_INFORMATION_REPLY, proposal=None)
 
     graph = _template_graph(session) if get_settings().llm_mode == "template" else _openai_graph(session)
     sent_history = history if get_settings().llm_mode == "template" else _redacted(history)
@@ -96,13 +85,20 @@ def run_turn(
         HumanMessage(content=text) if role == "user" else AIMessage(content=text)
         for role, text in sent_history
     ]
-    result = graph.invoke(
-        {
-            "messages": [*earlier, HumanMessage(content=user_message)],
-            "account_id": account_id,
-            "proposal": None,
-        }
-    )
+    try:
+        result = graph.invoke(
+            {
+                "messages": [*earlier, HumanMessage(content=user_message)],
+                "account_id": account_id,
+                "proposal": None,
+            }
+        )
+    except httpx.HTTPError:
+        # A list or a VAT breakdown does not need the model. A busy model must not hide it.
+        if reports_books(user_message, history) and not wants_transfer(user_message, history):
+            reply, proposal = answer(session, account_id, user_message, history)
+            return ChatTurn(reply=reply, proposal=proposal)
+        raise
     reply = _reply_text(result["messages"])
     proposal = result["proposal"]
     if get_settings().llm_mode != "template":
@@ -138,7 +134,7 @@ def _openai_graph(session: Session):
         raise RuntimeError("OPENAI_MODEL is required when LLM_MODE=openai")
 
     def call_model(state: AgentState) -> dict:
-        tools = build_tools(session, state["account_id"])
+        tools = build_tools(session, state["account_id"], _latest_user(state["messages"]))
         as_of = get_account(session, state["account_id"]).as_of_date
         message = _complete(
             [
@@ -157,7 +153,7 @@ def _openai_graph(session: Session):
         return {"messages": [message]}
 
     def run_tools(state: AgentState) -> dict:
-        tools = build_tools(session, state["account_id"])
+        tools = build_tools(session, state["account_id"], _latest_user(state["messages"]))
         update = ToolNode(tools).invoke(state)
         proposal = state["proposal"]
         for message in update["messages"]:
@@ -183,30 +179,6 @@ def _openai_graph(session: Session):
     return graph.compile()
 
 
-def _personal_information_turn(history: Sequence[tuple[str, str]]) -> ChatTurn:
-    """The model is told a message was withheld. It never receives that message."""
-    settings = get_settings()
-    if not settings.openai_model:
-        raise RuntimeError("OPENAI_MODEL is required when LLM_MODE=openai")
-    earlier = [
-        HumanMessage(content=text) if role == "user" else AIMessage(content=text)
-        for role, text in _redacted(history)
-    ]
-    message = _complete(
-        [
-            SystemMessage(content=_WITHHELD_PROMPT),
-            *earlier,
-            HumanMessage(content=PERSONAL_INFORMATION),
-        ],
-        [],
-        settings.openai_base_url,
-        settings.openai_api_key,
-        settings.openai_model,
-    )
-    content = message.content if isinstance(message.content, str) else str(message.content or "")
-    return ChatTurn(reply=_rewrite_request(content), proposal=None)
-
-
 def _redacted(history: Sequence[tuple[str, str]]) -> list[tuple[str, str]]:
     return [(role, _for_model(text)) for role, text in history]
 
@@ -215,17 +187,6 @@ def _for_model(text: str) -> str:
     if contains_personal_information(text):
         return PERSONAL_INFORMATION
     return text
-
-
-def _rewrite_request(text: str) -> str:
-    cleaned = text.strip()
-    if (
-        _MENTIONS_PERSONAL.search(cleaned)
-        and _REWRITE.search(cleaned)
-        and not contains_personal_information(cleaned)
-    ):
-        return cleaned
-    return _REWRITE_FALLBACK
 
 
 def _complete(
@@ -306,6 +267,13 @@ def _openai_message(message: AnyMessage) -> dict:
     return payload
 
 
+def _latest_user(messages: Sequence[AnyMessage]) -> str:
+    for message in reversed(messages):
+        if isinstance(message, HumanMessage):
+            return str(message.content)
+    return ""
+
+
 def _reply_text(messages: list[AnyMessage]) -> str:
     for message in reversed(messages):
         if isinstance(message, AIMessage) and message.content and not message.tool_calls:
@@ -360,6 +328,12 @@ def _settle_turn(
     # Otherwise the model can repeat an amount the user invented.
     if proposal is not None:
         reply = proposal.explanation
+
+    # Lists and the VAT breakdown are written in Python, for the period the user named.
+    # The model is not trusted to keep the window or the line breaks.
+    if proposal is None and reports_books(user_message, history) and not wants_transfer(user_message, history):
+        reply, _ = answer(session, account_id, user_message, history)
+        return reply, proposal
 
     if proposal is None and not _dates_match_tools(reply, messages):
         exact = _quoted_lines(messages)

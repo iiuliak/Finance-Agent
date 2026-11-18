@@ -5,9 +5,15 @@ from uuid import UUID
 from langchain_core.tools import BaseTool, tool
 from sqlalchemy.orm import Session
 
-from finance_agent.agent.template import expense_lines, invoice_lines
+from finance_agent.agent.template import (
+    _chosen_expenses,
+    _chosen_invoices,
+    expense_lines,
+    explain_vat,
+    invoice_lines,
+)
+from finance_agent.agent.when import view_for
 from finance_agent.domain.forecast import forecast_vat, known_as_of, vat_so_far
-from finance_agent.domain.periods import quarter_containing
 from finance_agent.domain.proposal import proposed_reserve_transfer
 from finance_agent.repositories.ledger import get_account, get_snapshot
 from finance_agent.services.proposals import draft_proposal, generate_proposal
@@ -18,44 +24,52 @@ APPROVAL_REQUIRED_TOOL_NAMES = frozenset({TRANSFER_TOOL_NAME})
 CURRENCY = "EUR"
 
 
-def build_tools(session: Session, account_id: UUID) -> list[BaseTool]:
-    """Tools the model may call. None of them moves money or accepts an amount."""
+def build_tools(session: Session, account_id: UUID, message: str = "") -> list[BaseTool]:
+    """Tools the model may call. None of them moves money or accepts an amount.
+
+    A month, quarter, year, or day in message is applied here. The model does not
+    choose the window, so it cannot move the dates.
+    """
 
     @tool
     def get_invoices() -> str:
-        """List this account's invoices as of the chosen day, including each invoice's VAT.
+        """List this account's invoices, including each invoice's VAT.
 
-        A payment dated after that day is omitted, so the invoice looks unpaid.
-        When you list invoices, repeat say_exactly unchanged.
+        The list is the period the user named, or every invoice known on the
+        chosen day when they named none. A payment dated after that day is omitted,
+        so the invoice looks unpaid. Repeat say_exactly unchanged, including its line breaks.
         """
         snapshot = get_snapshot(session, account_id)
-        invoices, _expenses = known_as_of(
-            snapshot.account.as_of_date, snapshot.invoices, snapshot.expenses
-        )
+        today = snapshot.account.as_of_date
+        view = view_for(message, today, "invoice")
+        invoices, _expenses = known_as_of(view.list_as_of, snapshot.invoices, snapshot.expenses)
+        chosen = _chosen_invoices(invoices, view, message)
         return json.dumps(
             {
                 "currency": CURRENCY,
-                "say_exactly": invoice_lines(invoices),
-                "invoices": [invoice.model_dump(mode="json") for invoice in invoices],
+                "say_exactly": invoice_lines(chosen, view.label),
+                "invoices": [invoice.model_dump(mode="json") for invoice in chosen],
             }
         )
 
     @tool
     def get_expenses() -> str:
-        """List this account's expenses as of the chosen day, including each one's input VAT.
+        """List this account's expenses, including each one's input VAT.
 
-        An expense dated after that day is omitted.
-        When you list expenses, repeat say_exactly unchanged.
+        The list is the period the user named, or every expense known on the
+        chosen day when they named none. An expense dated after that day is omitted.
+        Repeat say_exactly unchanged, including its line breaks.
         """
         snapshot = get_snapshot(session, account_id)
-        _invoices, expenses = known_as_of(
-            snapshot.account.as_of_date, snapshot.invoices, snapshot.expenses
-        )
+        today = snapshot.account.as_of_date
+        view = view_for(message, today, "expense")
+        _invoices, expenses = known_as_of(view.list_as_of, snapshot.invoices, snapshot.expenses)
+        chosen = _chosen_expenses(expenses, view)
         return json.dumps(
             {
                 "currency": CURRENCY,
-                "say_exactly": expense_lines(expenses),
-                "expenses": [expense.model_dump(mode="json") for expense in expenses],
+                "say_exactly": expense_lines(chosen, view.label),
+                "expenses": [expense.model_dump(mode="json") for expense in chosen],
             }
         )
 
@@ -79,8 +93,10 @@ def build_tools(session: Session, account_id: UUID) -> list[BaseTool]:
         would fill the gap.
         """
         snapshot = get_snapshot(session, account_id)
-        as_of = snapshot.account.as_of_date
-        period = quarter_containing(as_of)
+        today = snapshot.account.as_of_date
+        view = view_for(message, today, "vat")
+        as_of = view.vat_as_of
+        period = view.period
         so_far = vat_so_far(period, as_of, snapshot.invoices, snapshot.expenses)
         forecast = forecast_vat(period, as_of, snapshot.invoices, snapshot.expenses)
         account = snapshot.account
@@ -101,6 +117,14 @@ def build_tools(session: Session, account_id: UUID) -> list[BaseTool]:
                 "reserve_balance": str(account.reserve_balance),
                 "reserve_covers_estimate": account.reserve_balance >= forecast.estimated_vat_due,
                 "suggested_transfer_to_reserve": str(suggested),
+                "say_exactly": explain_vat(
+                    view,
+                    today,
+                    snapshot.invoices,
+                    snapshot.expenses,
+                    account.reserve_balance,
+                    account.operating_balance,
+                ),
             }
         )
 

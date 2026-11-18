@@ -1,7 +1,11 @@
 import re
 
-# The whole user turn is replaced by this before a model call. It is not the user's text.
+# A withheld turn is replaced by this in later history. It is not the user's text.
 PERSONAL_INFORMATION = "personal_information"
+PERSONAL_INFORMATION_REPLY = (
+    "Your message contains personal information (e.g., a name, surname, IBAN, "
+    "email, or phone number). Please remove it from your message."
+)
 
 _EMAIL = re.compile(
     r"\b[A-Za-z0-9._%+-]+\s*@\s*[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
@@ -11,6 +15,11 @@ _IBAN = re.compile(
     re.IGNORECASE,
 )
 _IBAN_WORD = re.compile(r"\biban\b", re.IGNORECASE)
+# "IBAN 676767676767" has no country code, so it is not a formal IBAN, but it is still one.
+_IBAN_NUMBER = re.compile(
+    r"\biban\b(?:\W+\w+){0,4}\W+\d(?:[\s-]*\d){5,}",
+    re.IGNORECASE,
+)
 _MONEY = re.compile(
     r"€\s?\d[\d.,]*|\b\d{1,3}(?:[.,]\d{3})+(?:[.,]\d{2})?\b|\b\d+[.,]\d{2}\b"
 )
@@ -98,6 +107,8 @@ def contains_personal_information(text: str) -> bool:
 
 
 def _has_iban(text: str) -> bool:
+    if _IBAN_NUMBER.search(text):
+        return True
     labeled = _IBAN_WORD.search(text) is not None
     for match in _IBAN.finditer(text):
         compact = re.sub(r"\s+", "", match.group()).upper()

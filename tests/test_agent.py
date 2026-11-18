@@ -1,6 +1,7 @@
 import json
 from decimal import Decimal
 
+import httpx
 import pytest
 from langchain_core.messages import AIMessage
 from sqlalchemy import func, select
@@ -10,7 +11,7 @@ from finance_agent import demo_data
 from finance_agent.agent import graph
 from finance_agent.agent.graph import run_turn
 from finance_agent.agent.intent import wants_transfer
-from finance_agent.agent.privacy import PERSONAL_INFORMATION
+from finance_agent.agent.privacy import PERSONAL_INFORMATION, PERSONAL_INFORMATION_REPLY
 from finance_agent.agent.tools import (
     APPROVAL_REQUIRED_TOOL_NAMES,
     READ_TOOL_NAMES,
@@ -257,6 +258,32 @@ def test_model_question_still_files_a_proposal_when_the_model_does_not(
     assert account.reserve_balance == demo_data.RESERVE_BALANCE
 
 
+def test_a_books_question_is_answered_when_the_model_is_busy(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed(db_session)
+    monkeypatch.setenv("LLM_MODE", "openai")
+    monkeypatch.setenv("OPENAI_MODEL", "scripted")
+
+    def fail(*_args: object, **_kwargs: object) -> None:
+        request = httpx.Request("POST", "https://example.test")
+        response = httpx.Response(429, request=request)
+        raise httpx.HTTPStatusError("busy", request=request, response=response)
+
+    monkeypatch.setattr(graph, "_complete", fail)
+
+    turn = run_turn(
+        db_session,
+        demo_data.DEMO_ACCOUNT_ID,
+        "show my invoices for the previous quarter and my expenses for current quarter",
+    )
+    invoices, expenses = turn.reply.split("**Expenses", 1)
+
+    assert "July–September 2026" in invoices
+    assert "October–December 2026" in expenses
+    assert turn.proposal is None
+
+
 def test_model_reply_drops_a_date_the_tools_did_not_return(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -382,41 +409,25 @@ def _sent(messages) -> str:
     return "\n".join(str(message.content) for message in messages)
 
 
-def test_personal_information_is_replaced_with_a_flag_and_files_nothing(
+def test_personal_information_gets_a_fixed_reply_and_does_not_call_the_model(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seed(db_session)
     monkeypatch.setenv("LLM_MODE", "openai")
     monkeypatch.setenv("OPENAI_MODEL", "scripted")
-    seen: list[tuple] = []
 
-    def fake_complete(messages, tools, *args):
-        seen.append((messages, tools))
-        return AIMessage(
-            content=(
-                "Your message contains personal information, such as a name or an email. "
-                "Please rewrite it without that."
-            )
-        )
+    def fail_if_called(*args):
+        raise AssertionError("the model was called")
 
-    monkeypatch.setattr(graph, "_complete", fake_complete)
-    message = (
-        "Set VAT aside. I am Ada Lovelace, ada@example.com, "
-        "IBAN DE89 3704 0044 0532 0130 00, +49 151 23456789."
+    monkeypatch.setattr(graph, "_complete", fail_if_called)
+
+    turn = run_turn(
+        db_session,
+        demo_data.DEMO_ACCOUNT_ID,
+        "Set VAT aside. I am Ada Lovelace, ada@example.com, IBAN DE89370400440532013000.",
     )
 
-    turn = run_turn(db_session, demo_data.DEMO_ACCOUNT_ID, message)
-    sent = _sent(seen[0][0])
-
-    assert seen[0][1] == []
-    assert sent.endswith(PERSONAL_INFORMATION)
-    assert "Ada" not in sent
-    assert "Lovelace" not in sent
-    assert "ada@example.com" not in sent
-    assert "DE89" not in sent
-    assert "+49" not in sent
-    assert "Set VAT aside" not in sent
-    assert "rewrite" in turn.reply.lower()
+    assert turn.reply == PERSONAL_INFORMATION_REPLY
     assert "Ada" not in turn.reply
     assert turn.proposal is None
     assert db_session.scalar(select(func.count()).select_from(Proposal)) == 0
@@ -451,7 +462,7 @@ def test_a_clean_message_is_sent_and_personal_history_is_not(
     assert "Ada" not in sent
 
 
-def test_personal_information_reply_falls_back_when_the_model_ignores_the_flag(
+def test_a_name_gets_the_same_fixed_reply(
     db_session: Session, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     seed(db_session)
@@ -461,8 +472,7 @@ def test_personal_information_reply_falls_back_when_the_model_ignores_the_flag(
 
     turn = run_turn(db_session, demo_data.DEMO_ACCOUNT_ID, "My surname is Müller.")
 
-    assert "personal information" in turn.reply.lower()
-    assert "rewrite" in turn.reply.lower()
+    assert turn.reply == PERSONAL_INFORMATION_REPLY
     assert "Müller" not in turn.reply
     assert "I moved" not in turn.reply
     assert turn.proposal is None
