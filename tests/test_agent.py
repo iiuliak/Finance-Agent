@@ -10,6 +10,7 @@ from finance_agent import demo_data
 from finance_agent.agent import graph
 from finance_agent.agent.graph import run_turn
 from finance_agent.agent.intent import wants_transfer
+from finance_agent.agent.privacy import PERSONAL_INFORMATION
 from finance_agent.agent.tools import (
     APPROVAL_REQUIRED_TOOL_NAMES,
     READ_TOOL_NAMES,
@@ -375,3 +376,93 @@ def test_transfer_tool_only_files_a_pending_proposal(db_session: Session) -> Non
     assert db_session.scalar(select(func.count()).select_from(Transfer)) == 0
     assert account.operating_balance == demo_data.OPERATING_BALANCE
     assert account.reserve_balance == demo_data.RESERVE_BALANCE
+
+
+def _sent(messages) -> str:
+    return "\n".join(str(message.content) for message in messages)
+
+
+def test_personal_information_is_replaced_with_a_flag_and_files_nothing(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed(db_session)
+    monkeypatch.setenv("LLM_MODE", "openai")
+    monkeypatch.setenv("OPENAI_MODEL", "scripted")
+    seen: list[tuple] = []
+
+    def fake_complete(messages, tools, *args):
+        seen.append((messages, tools))
+        return AIMessage(
+            content=(
+                "Your message contains personal information, such as a name or an email. "
+                "Please rewrite it without that."
+            )
+        )
+
+    monkeypatch.setattr(graph, "_complete", fake_complete)
+    message = (
+        "Set VAT aside. I am Ada Lovelace, ada@example.com, "
+        "IBAN DE89 3704 0044 0532 0130 00, +49 151 23456789."
+    )
+
+    turn = run_turn(db_session, demo_data.DEMO_ACCOUNT_ID, message)
+    sent = _sent(seen[0][0])
+
+    assert seen[0][1] == []
+    assert sent.endswith(PERSONAL_INFORMATION)
+    assert "Ada" not in sent
+    assert "Lovelace" not in sent
+    assert "ada@example.com" not in sent
+    assert "DE89" not in sent
+    assert "+49" not in sent
+    assert "Set VAT aside" not in sent
+    assert "rewrite" in turn.reply.lower()
+    assert "Ada" not in turn.reply
+    assert turn.proposal is None
+    assert db_session.scalar(select(func.count()).select_from(Proposal)) == 0
+    assert db_session.scalar(select(func.count()).select_from(Transfer)) == 0
+
+
+def test_a_clean_message_is_sent_and_personal_history_is_not(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed(db_session)
+    monkeypatch.setenv("LLM_MODE", "openai")
+    monkeypatch.setenv("OPENAI_MODEL", "scripted")
+    seen: list[list] = []
+
+    def fake_complete(messages, *args):
+        seen.append(messages)
+        return AIMessage(content="VAT already due is €2,565.00.")
+
+    monkeypatch.setattr(graph, "_complete", fake_complete)
+
+    run_turn(
+        db_session,
+        demo_data.DEMO_ACCOUNT_ID,
+        "How much VAT do I owe?",
+        [("user", "my email is ada@example.com"), ("assistant", "Hello Ada")],
+    )
+    sent = _sent(seen[0])
+
+    assert "How much VAT do I owe?" in sent
+    assert PERSONAL_INFORMATION in sent
+    assert "ada@example.com" not in sent
+    assert "Ada" not in sent
+
+
+def test_personal_information_reply_falls_back_when_the_model_ignores_the_flag(
+    db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seed(db_session)
+    monkeypatch.setenv("LLM_MODE", "openai")
+    monkeypatch.setenv("OPENAI_MODEL", "scripted")
+    monkeypatch.setattr(graph, "_complete", lambda *args: AIMessage(content="I moved the money."))
+
+    turn = run_turn(db_session, demo_data.DEMO_ACCOUNT_ID, "My surname is Müller.")
+
+    assert "personal information" in turn.reply.lower()
+    assert "rewrite" in turn.reply.lower()
+    assert "Müller" not in turn.reply
+    assert "I moved" not in turn.reply
+    assert turn.proposal is None

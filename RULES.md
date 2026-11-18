@@ -78,7 +78,7 @@ A transfer is inserted only by the approve decision:
 - A second decision on the same proposal is rejected. The idempotency key of a transfer is the proposal id, and each proposal has at most one transfer.
 - Generating a proposal sets every other `pending` proposal for the account to `superseded`. A superseded proposal cannot be approved, because its amount was computed from balances that may have changed. At most one proposal per account is pending.
 
-The model writes the explanation only. It does not choose any amount.
+The model writes the explanation only. It does not choose any amount. A user message that contains personal information is replaced with a flag before it reaches the model, and the model asks the user to rewrite it.
 
 ## Where the dates come from
 

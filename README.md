@@ -65,6 +65,8 @@ The model never does arithmetic and never chooses an amount. It can call five to
 
 `transfer_to_reserve` only saves a pending proposal whose amount Python computed. Money moves only when the user clicks Approve, which calls `POST /api/proposals/{id}/decision`, an endpoint the model has no access to.
 
+A user message that contains personal information, such as a name, a surname, an IBAN, an email, or a phone number, is not sent. The model receives the flag `personal_information` instead and asks the user to rewrite the message. Earlier chat turns that contain personal information are replaced with the same flag. A message without that information is sent as written.
+
 ## How we show it works
 
 Forecast error against the true VAT in the synthetic data. This check scores the opening day (today, or `AS_OF_DATE`). It does not follow the day selected on the page:

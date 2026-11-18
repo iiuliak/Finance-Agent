@@ -13,6 +13,7 @@ from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
 from finance_agent.agent.intent import refuses_transfer, wants_transfer
+from finance_agent.agent.privacy import PERSONAL_INFORMATION, contains_personal_information
 from finance_agent.agent.state import AgentState, ChatTurn
 from finance_agent.agent.template import answer
 from finance_agent.agent.tools import TRANSFER_TOOL_NAME, build_tools
@@ -46,7 +47,27 @@ _SYSTEM_PROMPT = (
     "If a tool returns say_exactly, repeat that text unchanged when you list those records. "
     "Copy every date exactly from the tool. Never change a year, month, or day. "
     "Do not state filing or payment deadlines, or any date that no tool returned. "
-    "Answer in a few short sentences of plain text, without markdown or tables."
+    "Answer in a few short sentences of plain text, without markdown or tables. "
+    "If a user message is exactly personal_information, the text was withheld because it "
+    "contains personal information. Tell them their message contains personal information, "
+    "such as a name, a surname, an IBAN, an email, or a phone number, and ask them to "
+    "rewrite it without that. Do not guess the withheld text and do not call tools for "
+    "that message."
+)
+
+_WITHHELD_PROMPT = (
+    "The latest user message is the flag personal_information. "
+    "The text was withheld because it contains personal information. "
+    "Tell the user their message contains personal information, such as a name, a surname, "
+    "an IBAN, an email, or a phone number, and ask them to rewrite it without that. "
+    "You do not know what was withheld. Do not guess it. "
+    "Answer in a few short sentences of plain text."
+)
+_REWRITE = re.compile(r"rewrit|rephras|reformulat|without that|without it", re.IGNORECASE)
+_MENTIONS_PERSONAL = re.compile(r"personal information", re.IGNORECASE)
+_REWRITE_FALLBACK = (
+    "Your message contains personal information, such as a name, a surname, an IBAN, "
+    "an email, or a phone number. Please rewrite it without that."
 )
 
 _ATTEMPTS = 3
@@ -64,11 +85,16 @@ def run_turn(
 
     history holds earlier (role, text) pairs, role "user" or "assistant", oldest first.
     It only gives the model context; figures still come from the tools.
+    A message with personal information is replaced by a flag before the model sees it.
     """
+    if get_settings().llm_mode != "template" and contains_personal_information(user_message):
+        return _personal_information_turn(history)
+
     graph = _template_graph(session) if get_settings().llm_mode == "template" else _openai_graph(session)
+    sent_history = history if get_settings().llm_mode == "template" else _redacted(history)
     earlier = [
         HumanMessage(content=text) if role == "user" else AIMessage(content=text)
-        for role, text in history
+        for role, text in sent_history
     ]
     result = graph.invoke(
         {
@@ -157,6 +183,51 @@ def _openai_graph(session: Session):
     return graph.compile()
 
 
+def _personal_information_turn(history: Sequence[tuple[str, str]]) -> ChatTurn:
+    """The model is told a message was withheld. It never receives that message."""
+    settings = get_settings()
+    if not settings.openai_model:
+        raise RuntimeError("OPENAI_MODEL is required when LLM_MODE=openai")
+    earlier = [
+        HumanMessage(content=text) if role == "user" else AIMessage(content=text)
+        for role, text in _redacted(history)
+    ]
+    message = _complete(
+        [
+            SystemMessage(content=_WITHHELD_PROMPT),
+            *earlier,
+            HumanMessage(content=PERSONAL_INFORMATION),
+        ],
+        [],
+        settings.openai_base_url,
+        settings.openai_api_key,
+        settings.openai_model,
+    )
+    content = message.content if isinstance(message.content, str) else str(message.content or "")
+    return ChatTurn(reply=_rewrite_request(content), proposal=None)
+
+
+def _redacted(history: Sequence[tuple[str, str]]) -> list[tuple[str, str]]:
+    return [(role, _for_model(text)) for role, text in history]
+
+
+def _for_model(text: str) -> str:
+    if contains_personal_information(text):
+        return PERSONAL_INFORMATION
+    return text
+
+
+def _rewrite_request(text: str) -> str:
+    cleaned = text.strip()
+    if (
+        _MENTIONS_PERSONAL.search(cleaned)
+        and _REWRITE.search(cleaned)
+        and not contains_personal_information(cleaned)
+    ):
+        return cleaned
+    return _REWRITE_FALLBACK
+
+
 def _complete(
     messages: list[AnyMessage],
     tools: list[BaseTool],
@@ -164,11 +235,12 @@ def _complete(
     api_key: str,
     model: str,
 ) -> AIMessage:
-    payload = {
+    payload: dict = {
         "model": model,
         "messages": [_openai_message(message) for message in messages],
-        "tools": [_openai_tool(tool) for tool in tools],
     }
+    if tools:
+        payload["tools"] = [_openai_tool(tool) for tool in tools]
     for attempt in range(_ATTEMPTS):
         response = httpx.post(
             base_url.rstrip("/") + "/chat/completions",
