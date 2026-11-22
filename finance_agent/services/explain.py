@@ -28,12 +28,16 @@ def write_explanation(facts: ExplanationFacts) -> str:
         f"Invoices still expected to be paid this quarter add {format_euros(facts.additional_vat)}. "
         f"Estimated VAT at quarter end is {format_euros(facts.estimated_vat_due)}. "
     )
+    owed = "The VAT is still owed until the Finanzamt is paid. "
     if facts.proposed_amount == 0:
         return figures + (
             f"Your reserve already holds {format_euros(facts.reserve_balance)}, "
-            "which covers it. There is nothing to move."
+            "which covers it. There is nothing to move. "
+            + owed
         )
     return figures + (
         f"Your reserve holds {format_euros(facts.reserve_balance)}. "
-        f"Move {format_euros(facts.proposed_amount)} from your operating account into the reserve."
+        f"Move {format_euros(facts.proposed_amount)} from your operating account into the reserve. "
+        + owed
+        + "Nothing moves until you approve it."
     )

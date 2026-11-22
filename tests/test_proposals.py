@@ -32,6 +32,8 @@ def test_template_copies_the_figures_it_is_given() -> None:
     assert "€500.00" in text
     assert "€4,085.00" in text
     assert "€3,585.00" in text
+    assert "still owed" in text
+    assert "Nothing moves until you approve it." in text
 
 
 def test_zero_proposal_says_there_is_nothing_to_move() -> None:
@@ -49,6 +51,8 @@ def test_zero_proposal_says_there_is_nothing_to_move() -> None:
 
     assert "nothing to move" in text
     assert "Move €0.00" not in text
+    assert "still owed" in text
+    assert "Nothing moves until you approve it." not in text
 
 
 def test_generate_proposal_does_not_move_money(db_session: Session) -> None:

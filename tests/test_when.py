@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 
 from sqlalchemy.orm import Session
 
@@ -148,6 +149,8 @@ def test_vat_on_a_named_day_shows_the_balance_and_the_lines(db_session: Session)
     assert "€380.00 from the €2,000.00 invoice issued 10 November 2026, paid on 10 December 2026" in reply
     assert "€190.00 on 10 October 2026" in reply
     assert "€3,230.00 collected − €285.00 input VAT = €2,945.00." in reply
+    assert "on the books today" in reply
+    assert "earlier days" not in reply
 
 
 def test_vat_today_still_reports_the_reserve(db_session: Session) -> None:
@@ -160,4 +163,54 @@ def test_vat_today_still_reports_the_reserve(db_session: Session) -> None:
     assert "€950.00 from the €5,000.00 invoice" in reply
     assert "€190.00 on 10 October 2026" in reply
     assert "€95.00 on 1 November 2026" in reply
+    assert "still owed" in reply
     assert "less than the estimated €4,085.00" in reply
+    assert "Moving €3,585.00" in reply
+    assert "Shall I set it aside?" in reply
+
+
+def test_a_yes_after_the_vat_offer_prepares_the_transfer(db_session: Session) -> None:
+    seed(db_session)
+
+    reply, _proposal = answer(db_session, DEMO_ACCOUNT_ID, "How much VAT do I owe?")
+    _follow, proposal = answer(
+        db_session,
+        DEMO_ACCOUNT_ID,
+        "yes",
+        [("assistant", reply)],
+    )
+
+    assert proposal is not None
+    assert proposal.proposed_amount == Decimal("3585.00")
+
+
+def test_balance_and_vat_in_one_question_keeps_both(db_session: Session) -> None:
+    seed(db_session)
+
+    reply, proposal = answer(
+        db_session,
+        DEMO_ACCOUNT_ID,
+        "What is my balance, and how much VAT do I owe?",
+    )
+
+    assert proposal is None
+    assert "€12,000.00" in reply
+    assert "€500.00" in reply
+    assert "€2,565.00" in reply
+
+
+def test_german_and_short_phrases_use_the_same_answers(db_session: Session) -> None:
+    seed(db_session)
+
+    vat, _proposal = answer(db_session, DEMO_ACCOUNT_ID, "Wie viel Umsatzsteuer schulde ich?")
+    invoices, _proposal = answer(db_session, DEMO_ACCOUNT_ID, "Zeig die Rechnungen")
+    owed, _proposal = answer(db_session, DEMO_ACCOUNT_ID, "How much is owed?")
+    outstanding, _proposal = answer(db_session, DEMO_ACCOUNT_ID, "What is outstanding?")
+
+    assert "€2,565.00" in vat
+    assert "Shall I set it aside?" in vat
+    assert "**Invoices**" in invoices
+    assert "€10,000.00" in invoices
+    assert "€2,565.00" in owed
+    assert "unpaid" in outstanding
+    assert "€8,000.00" in outstanding

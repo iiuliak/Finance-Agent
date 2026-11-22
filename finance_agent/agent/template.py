@@ -11,28 +11,41 @@ from finance_agent.agent.when import View, mentions_when, quarter_label, view_fo
 from finance_agent.domain.forecast import forecast_vat, known_as_of
 from finance_agent.domain.money import format_euros
 from finance_agent.domain.periods import format_day, quarter_containing
+from finance_agent.domain.proposal import proposed_reserve_transfer
 from finance_agent.domain.vat import calculate_vat
 from finance_agent.models import ExpenseRead, InvoiceRead, VATProposalRead
 from finance_agent.repositories.ledger import get_snapshot
 from finance_agent.services.proposals import draft_proposal, generate_proposal
 
-_SUBJECTS = (
+# The same words the tools answer, including the German ones the transfer path already accepts.
+_INVOICE_WORDS = (
     "invoice",
     "invoices",
-    "expense",
-    "expenses",
+    "rechnung",
+    "rechnungen",
+    "unpaid",
+    "outstanding",
+    "unbezahlt",
+)
+_EXPENSE_WORDS = ("expense", "expenses", "spent", "spend", "ausgabe", "ausgaben")
+_VAT_WORDS = (
     "vat",
     "owe",
+    "owed",
     "due",
     "tax",
-    "unpaid",
-    "paid",
-    "spent",
-    "spend",
-    "reserve",
-    "balance",
-    "operating",
-    "cash",
+    "forecast",
+    "estimate",
+    "umsatzsteuer",
+    "mehrwertsteuer",
+    "schulde",
+    "schuldig",
+)
+_BALANCE_WORDS = ("balance", "operating", "cash", "reserve", "rücklage", "ruecklage")
+_PAID_WORDS = ("paid", "payment", "bezahlt", "bezahlte")
+_UNPAID_WORDS = ("unpaid", "outstanding", "unbezahlt")
+_SUBJECTS = tuple(
+    dict.fromkeys((*_INVOICE_WORDS, *_EXPENSE_WORDS, *_VAT_WORDS, *_BALANCE_WORDS, *_PAID_WORDS))
 )
 
 
@@ -57,15 +70,15 @@ def answer(
     expense_view = view_for(question, today, "expense")
     vat_view = view_for(question, today, "vat")
     account = snapshot.account
-    asked_vat = _asks(question, "vat", "owe", "due", "tax", "forecast", "estimate")
-    asked_invoices = _asks(question, "invoice", "invoices", "unpaid") or (
-        _asks(question, "paid") and not asked_vat
+    asked_vat = _asks(question, *_VAT_WORDS)
+    asked_invoices = _asks(question, *_INVOICE_WORDS) or (
+        _asks(question, *_PAID_WORDS) and not asked_vat
     )
-    asked_expenses = _asks(question, "expense", "expenses", "spent", "spend")
-    asked_balance = _asks(question, "balance", "operating", "cash", "reserve")
+    asked_expenses = _asks(question, *_EXPENSE_WORDS)
+    asked_balance = _asks(question, *_BALANCE_WORDS)
 
     parts: list[str] = []
-    if asked_balance and not asked_vat:
+    if asked_balance:
         parts.append(
             f"The operating account holds {format_euros(account.operating_balance)}. "
             f"The reserve holds {format_euros(account.reserve_balance)}."
@@ -97,7 +110,7 @@ def answer(
             f"and the reserve holds {format_euros(account.reserve_balance)}. "
             f"VAT already due this quarter is {format_euros(so_far.vat_due)}. "
             f"Estimated VAT at quarter end is {format_euros(forecast.estimated_vat_due)}. "
-            "You can ask about invoices, expenses, or the reserve, "
+            "You can ask about invoices, expenses, VAT, or the reserve, "
             "or name a month, a quarter, or a day."
         )
     return "\n\n".join(parts), None
@@ -181,6 +194,8 @@ def explain_vat(
     )
     if so_far.net_vat < 0:
         lines.append("Input VAT is higher, so nothing is due.")
+    elif so_far.vat_due > 0:
+        lines.append("This VAT is still owed. Paying the Finanzamt is separate from the reserve.")
     current = view.period.period_start <= today < view.period.period_end and view.vat_as_of == today
     if current:
         forecast = forecast_vat(view.period, today, invoices, expenses)
@@ -188,7 +203,11 @@ def explain_vat(
             [
                 "",
                 f"Open invoices still expected this quarter add {format_euros(forecast.expected_additional_vat)}. "
-                + _reserve_status(reserve_balance, forecast.estimated_vat_due),
+                + _reserve_status(
+                    reserve_balance,
+                    operating_balance,
+                    forecast.estimated_vat_due,
+                ),
             ]
         )
     elif view.vat_as_of != today:
@@ -197,7 +216,7 @@ def explain_vat(
                 "",
                 f"The reserve on the books today is {format_euros(reserve_balance)}, "
                 f"and the operating account holds {format_euros(operating_balance)}. "
-                "Those balances are not stored for earlier days.",
+                "Those balances are the ones on the books today.",
             ]
         )
     return "\n".join(lines)
@@ -206,7 +225,7 @@ def explain_vat(
 def _chosen_invoices(invoices: list[InvoiceRead], view: View, message: str) -> list[InvoiceRead]:
     chosen = invoices
     if view.start is not None and view.end is not None:
-        if _asks(message, "paid", "payment") and not _asks(message, "unpaid"):
+        if _asks(message, *_PAID_WORDS) and not _asks(message, *_UNPAID_WORDS):
             chosen = [
                 invoice
                 for invoice in invoices
@@ -216,7 +235,7 @@ def _chosen_invoices(invoices: list[InvoiceRead], view: View, message: str) -> l
             chosen = [
                 invoice for invoice in invoices if view.start <= invoice.issue_date < view.end
             ]
-    if _asks(message, "unpaid", "outstanding"):
+    if _asks(message, *_UNPAID_WORDS):
         chosen = [invoice for invoice in chosen if invoice.payment_date is None]
     return sorted(chosen, key=lambda invoice: (invoice.issue_date, invoice.net_amount))
 
@@ -228,15 +247,28 @@ def _chosen_expenses(expenses: list[ExpenseRead], view: View) -> list[ExpenseRea
     return sorted(chosen, key=lambda expense: (expense.expense_date, expense.gross_amount))
 
 
-def _reserve_status(reserve_balance: Decimal, estimated_vat_due: Decimal) -> str:
+def _reserve_status(
+    reserve_balance: Decimal,
+    operating_balance: Decimal,
+    estimated_vat_due: Decimal,
+) -> str:
+    """Whether the reserve covers the estimate, and the transfer the tool would suggest."""
     if reserve_balance >= estimated_vat_due:
         return (
             f"Your reserve holds {format_euros(reserve_balance)}, which already covers the "
             f"estimated {format_euros(estimated_vat_due)} at quarter end."
         )
-    return (
+    gap = (
         f"Your reserve holds {format_euros(reserve_balance)}, less than the estimated "
-        f"{format_euros(estimated_vat_due)} at quarter end. Ask me to move money into the reserve."
+        f"{format_euros(estimated_vat_due)} at quarter end. "
+    )
+    amount = proposed_reserve_transfer(estimated_vat_due, operating_balance, reserve_balance)
+    if amount == 0:
+        return gap + "The operating account has nothing left to move."
+    return (
+        gap
+        + f"Moving {format_euros(amount)} from the operating account would add it to the reserve. "
+        "Shall I set it aside?"
     )
 
 

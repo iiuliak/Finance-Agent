@@ -147,6 +147,8 @@ def test_vat_summary_after_approval_says_the_reserve_covers_it(db_session: Sessi
     assert summary["reserve_covers_estimate"] is True
     assert summary["suggested_transfer_to_reserve"] == "0.00"
     assert "already covers" in template_reply.reply
+    assert "still owed" in template_reply.reply
+    assert "Shall I" not in template_reply.reply
 
 
 def test_transfer_tool_files_nothing_when_the_reserve_covers_the_estimate(db_session: Session) -> None:
