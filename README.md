@@ -1,6 +1,6 @@
 # VAT Reserve Agent
 
-Freelancers collect VAT from their clients and then spend it. When the quarterly payment to the Finanzamt is due, the money is no longer in the account.
+SME collect VAT from their clients and then spend it. When the quarterly payment to the Finanzamt is due, the money is no longer in the account.
 
 This demo is an agent that keeps that VAT aside. It looks at one account, says how much of the balance is VAT, and proposes moving that amount into a tax reserve. The user approves or rejects the proposal. Money moves only after they click Approve.
 
